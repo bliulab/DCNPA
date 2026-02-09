@@ -6,8 +6,8 @@ from tqdm import tqdm
 # %%
 def get_similarity_env(batch_seq, similarity_dict, feature_dict):
     """
-    提取并筛选与 batch_seq 中序列相似的环境信息，
-    仅保留末尾元素存在于 feature_dict 中的条目。
+    Extract and filter environment information that is similar to
+    sequences in batch_seq. Only entries whose last element exists in feature_dict are retained.
     """
     sim_env = [similarity_dict.get(seq, []) for seq in batch_seq]
     
@@ -31,15 +31,17 @@ def extract_last_element_from_nested_lists(nested_list):
 
 def build_mask_from_peptide_simenv(sim_info):
     """
-    输入为 peptide_simenv 的一条记录，返回:
+    Given one record from peptide_simenv, return:
     - mask tensor: shape [L_target, 1]
-    - env_indices: List[int], 环境蛋白中对应的索引（-1 表示未匹配）
-    
-    参数:
-        sim_info: list，结构为 [target_aln, alignment, env_aln, score, raw_seq]
-        
-    返回:
-        mask: torch.FloatTensor [L_target, 1]
+    - env_indices: List[int], corresponding indices in the environment
+      protein (-1 indicates no match)
+
+    Args:
+        sim_info: list with the structure
+                  [target_aln, alignment, env_aln, score, raw_seq]
+
+    Returns:
+        mask: torch.FloatTensor of shape [L_target, 1]
         env_indices: list of int
     """
     target_aln, alignment, env_aln = sim_info[0], sim_info[1], sim_info[2]
@@ -76,14 +78,14 @@ def DeepAnalysis(seq_list, deepblast_dict_path, T5_feature):
     with open(deepblast_dict_path, "rb") as f:
         similarity_deepblast_dict = pickle.load(f)
 
-    # for tmp in range(len(complex_ids)):
     for tmp in tqdm(range(len(seq_list)), desc="Processing complex_ids"):
 
-        # 环境多肽及环境蛋白质的特征整理  - 下面这个地方在报错
+        # Collect features of environment peptides and environment proteins
         simenv = get_similarity_env(seq_list, similarity_deepblast_dict, T5_feature)
         simenv_seq = extract_last_element_from_nested_lists(simenv)[0]
 
-        # 环境多肽及环境蛋白质对应的mask - 存储ResAlign的结果
+        # Masks corresponding to environment peptides and proteins
+        # Used to store residue-level alignment (ResAlign) results
         sim_mask, sim_indices = [], []
         for envtmp in range(len(simenv[0])):
             sim_info = simenv[0][envtmp]
