@@ -30,8 +30,8 @@ def protein_feature_extract(prolist, uip):
     # Define the function task for each feature extraction
     def extract_features():
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_seq_pro = executor.submit(sequence_feature_extract, prolist, protein_max_length) # 没问题
-            future_physical_pro = executor.submit(physical_feature_extract, prolist, protein_max_length) # 没问题
+            future_seq_pro = executor.submit(sequence_feature_extract, prolist, protein_max_length)
+            future_physical_pro = executor.submit(physical_feature_extract, prolist, protein_max_length)
             future_dense_pro = executor.submit(dense_feature_extract, prolist, uip, 'Protein', protein_max_length)
             future_ss_pro = executor.submit(secondary_structure_feature_extract, prolist, uip, 'Protein', protein_max_length)
             future_pretrain_pro = executor.submit(pretrain_feature_extract, prolist, uip, 'Protein', protein_max_length)
