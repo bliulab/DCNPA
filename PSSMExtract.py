@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Created on 2022-11-09 20:58
-
-@author: Shutao Chen
-"""
 # %%
 import time
 import argparse
@@ -39,7 +34,6 @@ def run_simple_search(fd):
                         '-out_ascii_pssm ' + pssm_file,  # Write the pssm file
                         '-num_threads ' + '1']
                        )
-        # subprocess.call(cmd, shell=True)
         process = subprocess.Popen(cmd, shell=True)
         process.wait()
 
@@ -81,7 +75,6 @@ def get_protein_blosum(proteinseq):
     protein_lst = []
     for aa in proteinseq:
         aa = aa.upper()
-        # 这个地方要检查一下sequence中的氨基酸是不是都为标准氨基酸！
         if aa not in blosum62.keys():
             aa = 'X'
         protein_lst.append(blosum62[aa])
