@@ -1,24 +1,25 @@
-# KGIPA
+# DCNPA
 
 <div align="center">
 
 </div>
 
-Understanding peptide-protein interactions is vital for decoding cellular signaling and developing targeted therapies. However, the complexity of multi-molecular associations and diverse non-covalent interactions make accurate prediction and site-specific annotation challenging. Here, we propose **KGIPA, a knowledge-guided pragmatic analysis framework that incorporates pragmatic concepts from natural language into life science**, capturing the influence of biological environments on non-covalent interactions. KGIPA integrates intra- and extra-linguistic contextual information to combine multimodal single-molecule features and build residue-level interaction maps. It also uses biological prior knowledge to coordinate various non-covalent interaction types. Benchmark tests demonstrate KGIPA outperforms the state-of-the-art methods in evaluating molecular binding, including protein and peptide binding residues and residue-pair interactions. Furthermore, KGIPA demonstrates strong performance in peptide-protein binding affinity prediction and peptide virtual screening. Wet-lab experiments validate its reliability, revealing high consistency between predicted and experimentally measured binding behaviors. **These results highlight KGIPA’s potential to accelerate peptide drug discovery and establish pragmatic analysis as an effective paradigm for decoding the molecular language of interactions.**
+Peptide-protein interactions (PepPIs), driven by specific residue-level contacts, are fundamental to cellular regulation and serve as pivotal targets for therapeutic development. Despite the substantial progress of deep learning in PepPI prediction, current methods encounter two critical bottlenecks: poor generalization to unseen targets due to reliance on static patterns, and the oversight of the complex macromolecular environment involving multimers. Here we present **Dynamic Context Networks for peptide-protein Pragmatic Analysis (DCNPA)**, a framework that models peptide-protein multimeric interaction from a dynamic contextual perspective. DCNPA integrates evolutionary priors and environmental constraints through the target-adaptive and multimer-aware dynamic context sub-networks, respectively. By fusing these dynamic contexts with intrinsic molecular features, DCNPA achieves robust residue-level interaction prediction under multi-granularity supervision. Applied to diverse benchmarks, DCNPA demonstrates strong generalization to novel targets and precise identification of binding interfaces, while revealing a multimer-mediated regulatory mechanism involving a transition from entropy-driven to enthalpy-dominated recognition. In downstream peptide drug virtual screening, DCNPA predictions show high concordance with wet-lab experimental results, highlighting its practical potential.
 
-**Given the complexity and potential instability of individual environment configurations, we strongly recommend using the upgraded online prediction server of KGIPA, available at **http://bliulab.net/KGIPA**.
+DCNPA is available as a web-based demonstration (http://bliulab.net/DCNPA), whereas **the full target-adaptive dynamic context subnetwork requires local deployment**. Users may select the optimal deployment mode based on their specific needs and computational resources.
 
 ![Model](/imgs/Model.png)
 
-**Fig. 1: The model architecture of KGIPA.** KGIPA is a neural network model designed to achieve biological sequence pragmatic analysis, and it can be mainly divided into two parts: intra-linguistic and extra-linguistic contextual representation.
+**Fig. 1: The framework of DCNPA.** Multimodal features of peptides, proteins, and environmental contexts are integrated via dynamic context networks to enable pragmatic analysis. a, Local representations of peptides, proteins, and environmental molecules are independently encoded via TextCNN and GraphSAGE at the residue level, then integrated by a multiscale transformer for information fusion. b, The target-adaptive dynamic context sub-network utilizes DeepBLAST to retrieve homologous sequences, which are structurally aligned via a residue-level alignment module to dynamically extract consensus template features as evolutionary priors. c, The multimer-aware dynamic context sub-network employs dual-branch attention mechanisms to model and encode multimeric constraints exerted by environmental molecules. d, Finally, a multi-view interaction modeling and fusion strategy integrates intrinsic molecular features with dynamic evolutionary and environmental contexts to predict the resultant peptide-protein interaction map.
+
 
 # 1 Installation
 
 ## 1.1 Create conda environment
 
 ```
-conda create -n kgipa python=3.10
-conda activate kgipa
+conda create -n dcnpa python=3.11
+conda activate dcnpa
 ```
 
 ## 1.2 Requirements
@@ -30,20 +31,19 @@ conda env update -f environment.yaml --prune
 
 If this approach fails or Conda is not available, you can manually install the main dependencies as listed below:
 ```
-python  3.10
-biopython 1.84
-huggingface-hub 0.26.1
+python  3.11
+biopython 1.85
+huggingface-hub 0.29.2
 numpy 2.1.2
-transformers 4.46.0
-tokenizers 0.20.1
-sentencepiece 0.2.0
-torch 2.5.0+cpu
-torchaudio 2.5.0+cpu
-torchvision 0.20.0+cpu
+transformers 4.49.0
+tokenizers 0.21.0
+torch 2.6.0+cu118
+torchaudio 2.6.0+cu118
+torchvision 0.21.0+cu118
 torch-geometric 2.6.1
 ```
 
-> **Note** If you have an available GPU, the accelerated KGIPA can be used to predict peptide-protein binary interactions and pair-specific binding residues. Change the URL below to reflect your version of the cuda toolkit (cu118 for cuda=11.6 and cuda 11.8, cu121 for cuda 12.1). However, do not provide a number greater than your installed cuda toolkit version!
+> **Note** If you have an available GPU, the accelerated DCNPA can be used to predict peptide-protein pair-specific binding residues. Change the URL below to reflect your version of the cuda toolkit (cu118 for cuda=11.6 and cuda 11.8, cu121 for cuda 12.1). However, do not provide a number greater than your installed cuda toolkit version!
 > 
 > ```
 > pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
@@ -52,7 +52,7 @@ torch-geometric 2.6.1
 > For more information on other cuda versions, see the [pytorch installation documentation](https://pytorch.org/).
 
 ## 1.3 Tools
-Feature extraction tools and databases on which KGIPA relies: 
+Feature extraction tools and databases on which DCNPA relies: 
 ```
 SCRATCH-1D 1.2
 IUPred2A \
@@ -63,7 +63,7 @@ trRosetta \
 
 Databases and model:
 ```
-nrdb90 [ncbi-blast Database](http://bliulab.net/KGIPA/static/download/nrdb90.tar.gz)
+nrdb90 [ncbi-blast Database](http://bliulab.net/DCNPA/static/download/nrdb90.tar.gz)
 uniclust30_2018_08 [HHsuite sequence Database](http://wwwuser.gwdg.de/~compbiol/uniclust/2018_08)
 model_res2net_202108 [Pre-trained network models of trRosetta](https://yanglab.qd.sdu.edu.cn/trRosetta/download/)
 ```
@@ -132,7 +132,7 @@ source ~/.bashrc
 psiblast -h
 ```
 
-> **Note:** The purpose of KGIPA with the help of ncbi-blast is to extract the position-specific scoring matrix (PSSM). It should be noted that for sequences that cannot be effectively aligned, the PSSM is further extracted by blosum62 (which can be found in [`blosum62.txt`](http://bliulab.net/KGIPA/static/download/blosum62.txt)).
+> **Note:** The purpose of DCNPA with the help of ncbi-blast is to extract the position-specific scoring matrix (PSSM). It should be noted that for sequences that cannot be effectively aligned, the PSSM is further extracted by blosum62 (which can be found in [`blosum62.txt`](http://bliulab.net/DCNPA/static/download/blosum62.txt)).
 
 
 ### 1.3.4 How to install ProtT5 (ProtT5-XL-UniRef50)
@@ -168,11 +168,11 @@ In `predict.sh`, set the `-mdir` parameter to the absolute path of the model_res
 These changes are necessary to ensure KGIPA can correctly invoke trRosetta for structure prediction.
 
 
-## 1.4 Install KGIPA
+## 1.4 Install DCNPA
 To install from the development branch run
 ```
-git clone git@github.com:ShutaoChen97/KGIPA.git
-cd KGIPA/
+git clone git@github.com:bliulab/DCNPA.git
+cd DCNPA/
 ```
 
 **Finally, configure the defalut path of the above tool and the database in `conf.py`. You can change the path of the tool and database by configuring `conf.py` as needed.**
