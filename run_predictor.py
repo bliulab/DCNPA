@@ -276,18 +276,14 @@ def DCNPA_Predict(peptide_seq_feature, protein_seq_feature, peptide_ss_feature, 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    
-    # 2025-09-27 新增shap分析
     parser.add_argument("-uip", required=True, help="User dir")
     parser.add_argument("-do_shap", default="0", help="Whether to run SHAP (0/1)")
-
     args = parser.parse_args()
     uip = args.uip
     
-    # 定义文件路径
     pep_uip = os.path.join(uip, 'Peptide_Main.fasta')
     pro_uip = os.path.join(uip, 'Protein_Main.fasta')
-    env_uip = os.path.join(uip, 'Env_All.fasta') # 新增：环境分子文件
+    env_uip = os.path.join(uip, 'Env_All.fasta')
     
     # --- 读取主序列 ---
     pep_seq_list, pro_seq_list = [], []
@@ -357,8 +353,6 @@ if __name__ == '__main__':
                 with open(file_path, 'rb') as f:
                     feats[dict_key] = pickle.load(f, encoding='iso-8859-1')
 
-        logging.info("相似分子特征加载完毕，可供调用。")
-
         # 加载pkl文件，生成相似的序列 mask 和 index
         peptide_simenv_seq, peptide_sim_mask, peptide_sim_index = DeepAnalysis(pep_seq_list, os.path.join(uip, 'peptide_similarity_dict.pkl'), feats['peptide_T5_feature'])
         protein_simenv_seq, protein_sim_mask, protein_sim_index = DeepAnalysis(pro_seq_list, os.path.join(uip, 'protein_similarity_dict.pkl'), feats['protein_T5_feature'])
@@ -376,13 +370,9 @@ if __name__ == '__main__':
         protein_simenv_dense_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_dense_feature'], 800)
         peptide_simenv_edge_padded = pad_and_stack_contact_maps(peptide_simenv_seq, feats['peptide_edge_feature'], 50)
         protein_simenv_edge_padded = pad_and_stack_contact_maps(protein_simenv_seq, feats['protein_edge_feature'], 800)
-
-        logging.info("目标自适应动态语境网络处理完毕")
-
     else:
-        logging.info("不执行目标自适应动态语境网络")
-
         peptide_simenv_seq, protein_simenv_seq = [[]], [[]]
+        peptide_sim_mask, peptide_sim_index, protein_sim_mask, protein_sim_index = [], [], [], []
 
         peptide_simenv_seq_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, {}, 50).long()
         protein_simenv_seq_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, 800).long()
@@ -397,14 +387,10 @@ if __name__ == '__main__':
         peptide_simenv_edge_padded = pad_and_stack_contact_maps(peptide_simenv_seq, {}, 50)
         protein_simenv_edge_padded = pad_and_stack_contact_maps(protein_simenv_seq, {}, 800)
 
-        peptide_sim_mask, peptide_sim_index, protein_sim_mask, protein_sim_index = [], [], [], []
-
-    # sys.exit(0)
 
 
-    # =========================== 3 多聚体感知动态语境网络 ===========================
-    # --- 读取环境分子并分流 ---
-    peptide_merenv_seq = [[]] # 保持你之前的嵌套格式需求
+    # =========================== multimer-aware dynamic context sub-network ===========================
+    peptide_merenv_seq = [[]]
     protein_merenv_seq = [[]]
     
     if os.path.exists(env_uip):
@@ -415,33 +401,25 @@ if __name__ == '__main__':
                     continue
                 
                 seq = line.upper()
-                # 按照 50 的阈值进行分流
                 if len(seq) <= 50:
                     protein_merenv_seq[0].append(seq)
                 else:
                     peptide_merenv_seq[0].append(seq)
 
-    # 3-2 准备存储多聚体环境序列特征的字典（如果还没初始化）
     protein_feature_dict_merenv, protein_ss_feature_dict_merenv = {}, {}
     protein_2_feature_dict_merenv, protein_T5_feature_dict_merenv = {}, {}
     protein_dense_feature_dict_merenv, protein_edge_feature_dict_merenv = {}, {}
-
     peptide_feature_dict_merenv, peptide_ss_feature_dict_merenv = {}, {}
     peptide_2_feature_dict_merenv, peptide_T5_feature_dict_merenv = {}, {}
     peptide_dense_feature_dict_merenv, peptide_edge_feature_dict_merenv = {}, {}
 
-    # 1. 汇总所有环境中出现的唯一序列（去重并压平嵌套列表）
-    # 使用 set 去重可以极大提高效率，避免重复提取相同序列的特征
-    unique_env_peps = list(set(chain.from_iterable(peptide_merenv_seq))) # 这里面存的是蛋白质序列
-    unique_env_pros = list(set(chain.from_iterable(protein_merenv_seq))) # 这里面存的是多肽序列
-    logging.info(unique_env_peps)
+    # Summarize unique sequences appearing in all environments (remove duplicates and flatten nested lists).
+    unique_env_peps = list(set(chain.from_iterable(peptide_merenv_seq)))
+    unique_env_pros = list(set(chain.from_iterable(protein_merenv_seq)))
 
-    logging.info('提取环境蛋白质特征')
-    # 3. 逐个提取多肽特征
+    # Extract peptide features one by one (lower-level functions can only process one sequence at a time).
     for r_seq in unique_env_peps:
-        # 包装成列表符合你底层函数的输入要求 [r_seq]
         r_feats = protein_feature_extract([r_seq], uip)
-        # 存入字典（注意：r_feats 是元组，内部每一项也是列表，所以取 [0]）
         protein_feature_dict_merenv[r_seq]      = r_feats[0][0]
         protein_2_feature_dict_merenv[r_seq]    = r_feats[1][0]
         protein_dense_feature_dict_merenv[r_seq]  = r_feats[2][0]
@@ -450,21 +428,15 @@ if __name__ == '__main__':
         protein_edge_feature_dict_merenv[r_seq]   = r_feats[5][0]
         clean_uip_directory(uip)
 
-    # 2. 逐个提取蛋白质特征 (因为底层函数一次只能处理一个序列)
-    logging.info('提取环境多肽特征')
-    logging.info(unique_env_pros)
+    # Extract protein features one by one (lower-level functions can only process one sequence at a time).
     for p_seq in unique_env_pros:
-        logging.info(p_seq)
-        # 包装成列表 [p_seq]
         p_feats = peptide_feature_extract([p_seq], uip)
-        # 存入字典
         peptide_feature_dict_merenv[p_seq]      = p_feats[0][0]
         peptide_2_feature_dict_merenv[p_seq]    = p_feats[1][0]
         peptide_dense_feature_dict_merenv[p_seq]  = p_feats[2][0]
         peptide_ss_feature_dict_merenv[p_seq]     = p_feats[3][0]
         peptide_T5_feature_dict_merenv[p_seq]     = p_feats[4][0]
         peptide_edge_feature_dict_merenv[p_seq]   = p_feats[5][0]
-        logging.info('清理中间结果--环境！')
         clean_uip_directory(uip)
 
     peptide_merenv_seq_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_feature_dict_merenv, 800).long()
@@ -480,7 +452,9 @@ if __name__ == '__main__':
     peptide_merenv_edge_padded = pad_and_stack_contact_maps(peptide_merenv_seq, protein_edge_feature_dict_merenv, 800)
     protein_merenv_edge_padded = pad_and_stack_contact_maps(protein_merenv_seq, peptide_edge_feature_dict_merenv, 50)
 
-    logging.info('特征送入模型')
+
+    
+    # DCNPA prediction
     ouputs_all, ouputs_all_pep, ouputs_all_pro = DCNPA_Predict(peptide_seq_feature, protein_seq_feature, peptide_ss_feature, protein_ss_feature,
                                                                 peptide_2_feature, protein_2_feature, peptide_pretrain_feature, protein_pretrain_feature, 
                                                                 peptide_dense_feature, protein_dense_feature, peptide_edge_feature, protein_edge_feature, 
@@ -494,7 +468,7 @@ if __name__ == '__main__':
                                                                 peptide_merenv_dense_padded, protein_merenv_dense_padded, peptide_merenv_edge_padded, protein_merenv_edge_padded,
                                                                 pep_len, pro_len)
 
-    # 把结果保存下来，用pickle
+    # Save results to pkl file
     result = [pep_seq_list[0], pro_seq_list[0], ouputs_all, ouputs_all_pep, ouputs_all_pro]
     result_filepath = open(os.path.join(uip, 'result.pkl'), 'wb')
     pickle.dump(result, result_filepath)
