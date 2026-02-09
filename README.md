@@ -96,7 +96,7 @@ cd <INSTALL_DIR>/doc
 
 > **Note:** If your computer has less than 4 cores, replace 4 by 1 in the command line above.
 
-**In addition, users need to move the `SCRATCH.sh` script in `/tools/SCRATCH-1D_1.2/` to the `bin/` directory under the SCRATCH-1D_1.2 installation path for KGIPA to call.**
+**In addition, users need to move the `SCRATCH.sh` script in `/tools/SCRATCH-1D_1.2/` to the `bin/` directory under the SCRATCH-1D_1.2 installation path for DCNPA to call.**
 
 ### 1.3.2 How to install IUPred2A
 For download and installation of IUPred2A, please refer to **https://iupred2a.elte.hu/download_new**. It should be noted that this automation service is **only applicable to academic users.** For business users, please contact the original authors for authorization. 
@@ -112,7 +112,7 @@ cd <INSTALL_DIR>
 python3 iupred2a.py P53_HUMAN.seq long
 ```
 
-**In addition, users need to move the `iupred2a.sh` script in `/tools/iupred2a/` to the IUPred2A installation path for KGIPA to call. Please also make sure to modify the path to the Python script (`iupred2a.py`) within the `iupred2a.sh` file to reflect the absolute path of your IUPred2A installation. This is necessary for the script to function correctly.**
+**In addition, users need to move the `iupred2a.sh` script in `/tools/iupred2a/` to the IUPred2A installation path for DCNPA to call. Please also make sure to modify the path to the Python script (`iupred2a.py`) within the `iupred2a.sh` file to reflect the absolute path of your IUPred2A installation. This is necessary for the script to function correctly.**
 
 ### 1.3.3 How to install ncbi-blast
 Download (For x64-linux, about 220M. More information, please see **https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html**)
@@ -152,7 +152,7 @@ tar -xvjf trRosettaX.tar.bz2
 cd trRosettaX/
 ```
 
-Then, refer to the README file to install and configure it. **In addition, users need to move the `generate_msa.sh` and `predict.sh` scripts in `/tools/trRosettaX/` to the trRosettaX installation path for KGIPA to call.**
+Then, refer to the README file to install and configure it. **In addition, users need to move the `generate_msa.sh` and `predict.sh` scripts in `/tools/trRosettaX/` to the trRosettaX installation path for DCNPA to call.**
 Please also ensure the following modifications are made for proper execution:
 
 **1) Conda Environment:**
@@ -165,7 +165,7 @@ In `generate_msa.sh`, set the `-hhdb` parameter to the absolute path of the unic
 
 In `predict.sh`, set the `-mdir` parameter to the absolute path of the model_res2net_202108 model directory.
 
-These changes are necessary to ensure KGIPA can correctly invoke trRosetta for structure prediction.
+These changes are necessary to ensure DCNPA can correctly invoke trRosetta for structure prediction.
 
 
 ## 1.4 Install DCNPA
@@ -185,24 +185,24 @@ It takes 2 steps to predict peptide-protein binary interaction and peptide-prote
 
 (2) Then, run `run_predictor.py` to make prediction, including **pairwise non-covalent interaction** prediction and **non-covalent bond type** identification. It should be noted that `run_predictor.py` automatically calls the scripts `FeatureExtract.py`, and `PSSMExtract.py` to generate the multi-source isomerization features of peptides and proteins.
 ```
-conda activate kgipa
+conda activate dcnpa
 python run_predictor.py -uip example
 ```
 
-If you want to retrain based on your private dataset, find the original KGIPA model in `model.py`. The KGIPA source code we wrote is based on the Pytorch implementation and can be easily imported by instantiating it.
+If you want to retrain based on your private dataset, find the original DCNPA model in `model.py`. The DCNPA source code we wrote is based on the Pytorch implementation and can be easily imported by instantiating it.
 
 # 3 Problem feedback
-If you have questions on how to use KGIPA, feel free to raise questions in the [discussions section](https://github.com/ShutaoChen97/KGIPA/discussions). If you identify any potential bugs, feel free to raise them in the [issuetracker](https://github.com/ShutaoChen97/KGIPA/issues).
+If you have questions on how to use DCNPA, feel free to raise questions in the [discussions section](https://github.com/bliulab/DCNPA/discussions). If you identify any potential bugs, feel free to raise them in the [issuetracker](https://github.com/bliulab/DCNPA/issues).
 
-In addition, if you have any further questions about KGIPA, please feel free to contact us [**stchen@bliulab.net**]
+In addition, if you have any further questions about DCNPA, please feel free to contact us [**stchen@bliulab.net**]
 
 # 4 Citation
 
 If you find our work useful, please cite us at
 ```
 @article{
-  title={Pragmatic analysis with knowledge-guided for unraveling peptide-protein pairwise non-covalent mechanisms},
-  author={Shutao Chen, Ke Yan, Jiangyi Shao, Xiangxiang Zeng, and Bin Liu},
+  title={Dynamic context networks integrating evolutionary priors and environmental constraints for deciphering peptide-protein multimeric interaction mechanisms},
+  author={Shutao Chen, Ke Yan, Tianqi Hu, Hongjun Yu, and Bin Liu},
   journal={submitted},
   year={2026},
   publisher={}
