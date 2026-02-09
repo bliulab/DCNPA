@@ -50,10 +50,6 @@ class TextCNN(nn.Module):
         return o1, o2, o3, o4
 
 class FCNet(nn.Module):
-    """Simple class for non-linear fully connect network
-    Modified from https://github.com/jnhwkim/ban-vqa/blob/master/fc.py
-    """
-
     def __init__(self, dims, act='ReLU', dropout=0):
         super(FCNet, self).__init__()
 
@@ -96,11 +92,9 @@ class EnvAttention(nn.Module):
 
 def run_batched_gcn(feat, edge, mask, gcn1, gcn2):
     """
-    GCN编码，逐样本循环执行，避免大图拼接造成显存爆炸
-
     Args:
         feat: Tensor (B, L, D)
-        edge: Tensor (B, L, L) 邻接矩阵（0/1）
+        edge: Tensor (B, L, L) Adjacency Matrix（0/1）
         mask: Tensor (B, L)
     
     Returns:
@@ -109,7 +103,7 @@ def run_batched_gcn(feat, edge, mask, gcn1, gcn2):
     B, L, D = feat.shape
     device = feat.device
 
-    padded = torch.zeros_like(feat)  # 直接创建 (B, L, D) 结构
+    padded = torch.zeros_like(feat)
 
     for i in range(B):
         node_mask = mask[i] > 0  # bool tensor (L,)
@@ -118,65 +112,67 @@ def run_batched_gcn(feat, edge, mask, gcn1, gcn2):
         if n_nodes == 0:
             continue
 
-        adj = edge[i][node_mask][:, node_mask]  # 取子图邻接矩阵 (n_nodes, n_nodes)
-        idx = torch.nonzero(adj > 0, as_tuple=False).T  # 边索引 shape (2, n_edges)
+        adj = edge[i][node_mask][:, node_mask]
+        idx = torch.nonzero(adj > 0, as_tuple=False).T
         if idx.size(1) == 0:
-            # 空图fallback，避免报错
             idx = torch.tensor([[0, 1], [0, 1]], dtype=torch.long, device=device)
             if n_nodes < 2:
-                idx = torch.zeros((2,0), dtype=torch.long, device=device)  # 若节点不足2，则无边
+                idx = torch.zeros((2,0), dtype=torch.long, device=device)
 
         # ----- GCN with Residual -----
         x1 = F.relu(gcn1(node_feat, idx))  # First GCN layer
         x2 = gcn2(x1, idx)                 # Second GCN layer
         x = F.relu(node_feat + x2)         # Residual connection with input
 
-        # 放回原位，未mask的填0
         padded[i][node_mask] = x
 
     return padded
 
 def align_features(target, env, indices, mask):
     """
-    对主链target与多个结构对齐env进行融合（残基级对齐+mask控制）
-    
+    Fuse the target backbone features with multiple structure-aligned
+    environment features (residue-level alignment with mask control).
+
     Args:
-        target: Tensor, shape (B, L, D)
-        env: Tensor, shape (B, N, L, D)
-        indices: LongTensor, shape (B, N, L), -1表示未对齐, -2表示补齐环境
-        mask: FloatTensor, shape (B, N, L), 1保留target，0用对齐值
-        
+        target: Tensor of shape (B, L, D)
+        env: Tensor of shape (B, N, L, D)
+        indices: LongTensor of shape (B, N, L),
+                 -1 indicates unaligned residues,
+                 -2 indicates padded environment positions
+        mask: FloatTensor of shape (B, N, L),
+              1 keeps the target feature,
+              0 replaces it with the aligned environment feature
+
     Returns:
-        Tensor (B, L, D) 融合特征
+        Tensor of shape (B, L, D), fused features
     """
     B, N, L, D = env.shape
     
-    # 标记有效环境（-2表示无效，置0，否则置1）
+    # Mark valid environment positions (-2 indicates invalid padding)
     valid_env_mask = (indices != -2).float()  # (B, N, L)
     
-    # 安全索引（将-1和-2替换为0防止gather报错）
+    # Safe indices (replace -1 and -2 with 0 to avoid gather errors)
     safe_indices = indices.clamp(min=0)  # (B, N, L)
     
-    # gather 对齐特征
+    # Gather aligned environment features
     aligned = torch.gather(env, 2, safe_indices.unsqueeze(-1).expand(-1, -1, -1, D))  # (B, N, L, D)
     
-    # mask扩展维度
+    # Expand mask dimensions
     mask_exp = mask.unsqueeze(-1)  # (B, N, L, 1)
     valid_env_mask_exp = valid_env_mask.unsqueeze(-1)  # (B, N, L, 1)
     
-    # target展开
+    # Expand target features across environments
     target_expanded = target.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, L, D)
     
-    # 特征混合
+    # Feature mixing
     mixed = mask_exp * target_expanded + (1 - mask_exp) * aligned  # (B, N, L, D)
     
-    # 用 valid_env_mask 做加权求和，排除无效环境
+    # Weighted summation using valid_env_mask to exclude invalid environments
     weighted_sum = mixed * valid_env_mask_exp  # (B, N, L, D)
     
-    # 归一化因子：每个残基对应的有效环境数量（避免除0）
+    # Normalization factor: number of valid environments per residue (avoid division by zero)
     valid_counts = valid_env_mask_exp.sum(dim=1).clamp(min=1)  # (B, L, 1)
-    
-    # fused = weighted_sum / valid_counts  # (B, L, D)
+
     return weighted_sum, valid_counts
 
 
@@ -192,7 +188,6 @@ class DCNPA(nn.Module):
         self.dense_pep = nn.Linear(3, 32)
         self.dense_pro = nn.Linear(23, 32)
 
-        # 2025-07-31测试
         self.pep_convs = TextCNN(256, 64, [3,5,7,9])
         self.pro_convs = TextCNN(256, 64, [5,10,15,20])
 
@@ -204,7 +199,7 @@ class DCNPA(nn.Module):
         self.pep_proj_cat = FCNet([512, 128], act='ReLU', dropout=0.2)
         self.pro_proj_cat = FCNet([512, 128], act='ReLU', dropout=0.2)
 
-        # 多尺度 peptide transformer
+        # multi-scale peptide transformer
         layer_small_pep = TransformerEncoderLayer(d_model=128, nhead=2, dim_feedforward=64, batch_first=True)
         layer_large_pep = TransformerEncoderLayer(d_model=128, nhead=4, dim_feedforward=64 * 2, batch_first=True)
         self.pep_transformer = nn.ModuleList([
@@ -212,7 +207,7 @@ class DCNPA(nn.Module):
             TransformerEncoder(layer_large_pep, num_layers=2)
         ])
 
-        # 多尺度 protein transformer
+        # multi-scale protein transformer
         layer_small_pro = TransformerEncoderLayer(d_model=128, nhead=2, dim_feedforward=64, batch_first=True)
         layer_large_pro = TransformerEncoderLayer(d_model=128, nhead=4, dim_feedforward=64 * 2, batch_first=True)
         self.pro_transformer = nn.ModuleList([
@@ -223,11 +218,11 @@ class DCNPA(nn.Module):
         self.pep_cross_attn = EnvAttention(d_model=256)
         self.pro_cross_attn = EnvAttention(d_model=256)
         
-        # 初始化为可学习参数（logits）
-        self.raw_weight = nn.Parameter(torch.tensor([8.0, 1.0, 1.0, 2.0, 2.0]))  # 主交互初始更高
+        # Initialize to learnable parameters (logits)
+        # The initial weight of the main interaction is slightly larger.
+        self.raw_weight = nn.Parameter(torch.tensor([8.0, 1.0, 1.0, 2.0, 2.0]))
 
-        # 模型 init 中添加
-        self.norm_origin = nn.LayerNorm([800, 50])  # 替换成你的实际 L_pro, L_pep
+        self.norm_origin = nn.LayerNorm([800, 50])
         self.norm_sim_pep = nn.LayerNorm([800, 50])
         self.norm_sim_pro = nn.LayerNorm([800, 50])
         self.norm_mer_pep = nn.LayerNorm([800, 50])
@@ -254,7 +249,7 @@ class DCNPA(nn.Module):
                 peptide_merenv_2_padded, protein_merenv_2_padded, peptide_merenv_pretrain_padded, protein_merenv_pretrain_padded,
                 peptide_merenv_dense_padded, protein_merenv_dense_padded, peptide_merenv_edge_padded, protein_merenv_edge_padded):
 
-        # ============ 主图特征嵌入 ============
+        # ================       Feature embedding       ================
         x_seq_pep = self.embed_seq(peptide_seq_feature)
         x_seq_pro = self.embed_seq(protein_seq_feature)
         x_ss_pep = self.embed_ss(peptide_ss_feature)
@@ -276,32 +271,24 @@ class DCNPA(nn.Module):
         c1_pro, c2_pro, c3_pro, c4_pro = self.pro_convs(encode_protein)
         encode_protein_local = torch.cat([c1_pro, c2_pro, c3_pro, c4_pro], dim=-1)
 
-        # ============ GCN 编码主图 ============
+        # ================       GCN       ================
         encode_peptide_space = run_batched_gcn(encode_peptide, peptide_edge_feature, peptide_mask, self.gcn_pep_1, self.gcn_pep_2)
         encode_protein_space = run_batched_gcn(encode_protein, protein_edge_feature, protein_mask, self.gcn_pro_1, self.gcn_pro_2)
-
         encode_peptide = torch.cat([encode_peptide_local, encode_peptide_space], dim=-1)
         encode_protein = torch.cat([encode_protein_local, encode_protein_space], dim=-1)
-
         encode_peptide = self.pep_proj_cat(encode_peptide) # torch.Size([8, 50, 128])
         encode_protein = self.pro_proj_cat(encode_protein) # torch.Size([8, 800, 128])
 
         # ================     Transformer     ================
         pep_features = [encoder(encode_peptide) for encoder in self.pep_transformer]
         pro_features = [encoder(encode_protein) for encoder in self.pro_transformer]
-        # 融合所有尺度
         encode_peptide = torch.cat(pep_features, dim=-1)  # torch.Size([8, 50, 256])
         encode_protein = torch.cat(pro_features, dim=-1)  # torch.Size([8, 800, 256])
 
-        logging.info('encode_protein: ', encode_protein)
-        logging.info('encode_peptide: ', encode_peptide)
-
         matmul_pair_origin = torch.matmul(encode_protein, encode_peptide.transpose(1, 2))
 
-        logging.info('matmul_pair_origin: ', matmul_pair_origin)
 
-
-        # ============ 多肽相似环境图 ============
+        # ================       target-adaptive dynamic context sub-network for peptide       ================
         if peptide_simenv_pretrain_padded.numel() != 0:
             B, max_m, L_pep, _ = peptide_simenv_pretrain_padded.shape
             flat_seq = self.embed_seq(peptide_simenv_seq_padded.view(B * max_m, L_pep))
@@ -331,7 +318,7 @@ class DCNPA(nn.Module):
             matmul_pair_sim_pep = torch.zeros_like(matmul_pair_origin)
 
 
-        # ============ 蛋白相似环境图 ============
+        # ================       target-adaptive dynamic context sub-network for protein       ================
         if protein_simenv_pretrain_padded.numel() != 0:
             B, max_n, L_pro, _ = protein_simenv_pretrain_padded.shape
 
@@ -361,7 +348,7 @@ class DCNPA(nn.Module):
 
 
 
-        # ================     Environment     ================
+        # ================       multimer-aware dynamic context sub-network for peptide       ================
         if peptide_merenv_pretrain_padded.numel() != 0:
             B, max_n, L_pro, D = peptide_merenv_pretrain_padded.shape
             flat_seq = self.embed_seq(peptide_merenv_seq_padded.view(B * max_n, L_pro))
@@ -382,15 +369,14 @@ class DCNPA(nn.Module):
             mer_pep_out = torch.cat(pro_features, dim=-1)
             mer_pep_out = mer_pep_out.view(B, max_n * L_pro, -1)
             
-            # 拼接 peptide 和 pep_env_flat： [B, 50+3×800, D]
             peptide_plus_env = torch.cat([encode_peptide, mer_pep_out], dim=1)
-            # protein 是 query，peptide+env 是 key/value
-            fused_out = self.pep_cross_attn(encode_protein, peptide_plus_env)  # (B, 800, 128)
-            # 最终输出 (B, 800, 50)
-            matmul_pair_mer_pep = torch.matmul(fused_out, encode_peptide.transpose(1, 2))  # (B, 800, 50)
+            fused_out = self.pep_cross_attn(encode_protein, peptide_plus_env)
+            matmul_pair_mer_pep = torch.matmul(fused_out, encode_peptide.transpose(1, 2))
         else:
             matmul_pair_mer_pep = torch.zeros_like(matmul_pair_origin)
-        
+
+                    
+        # ================       multimer-aware dynamic context sub-network for protein       ================
         if protein_merenv_pretrain_padded.numel() != 0:
             B, max_m, L_pep, _ = protein_merenv_pretrain_padded.shape
             flat_seq = self.embed_seq(protein_merenv_seq_padded.view(B * max_m, L_pep))
@@ -413,15 +399,14 @@ class DCNPA(nn.Module):
             mer_pro_out = mer_pro_out.view(B, max_m * L_pep, -1)
             
             protein_plus_env = torch.cat([encode_protein, mer_pro_out], dim=1)
-            fused_out = self.pro_cross_attn(encode_peptide, protein_plus_env)  # (B, 50, 128)
-            # 最终输出 (B, 800, 50)
-            matmul_pair_mer_pro = torch.matmul(fused_out, encode_protein.transpose(1, 2)).transpose(1, 2)  # (B, 800, 50)
+            fused_out = self.pro_cross_attn(encode_peptide, protein_plus_env)
+            matmul_pair_mer_pro = torch.matmul(fused_out, encode_protein.transpose(1, 2)).transpose(1, 2)
         else:
             matmul_pair_mer_pro = torch.zeros_like(matmul_pair_origin)
+
+                    
         
-        
-        # ============ 交互图融合与卷积 ============        
-        # forward 中调用（仅作用于非 mask 区域）
+        # ================       multi-view interaction modeling and fusion       ================     
         matmul_pair_origin = self.norm_origin(matmul_pair_origin)
         matmul_pair_mer_pep = self.norm_mer_pep(matmul_pair_mer_pep)
         matmul_pair_mer_pro = self.norm_mer_pro(matmul_pair_mer_pro)
