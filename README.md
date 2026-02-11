@@ -170,6 +170,32 @@ In `predict.sh`, set the `-mdir` parameter to the absolute path of the model_res
 These changes are necessary to ensure DCNPA can correctly invoke trRosetta for structure prediction.
 
 
+### 1.3.6 How to install DeepBLAST
+Create a new virtual environment and activate it:
+```
+python3 -m venv tmvec
+source tmvec/bin/activate
+```
+
+You will then need to install faiss via 
+```
+pip install faiss-cpu
+pip install tm-vec
+```
+
+To install the development versions, run the following commands
+```
+pip install git+https://github.com/tymor22/tm-vec.git
+```
+
+If you have a GPU available, you can take advantage of accelerated database building, search and alignment.
+```
+pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
+pip3 install faiss-gpu
+```
+
+
+
 ## 1.4 Install DCNPA
 To install from the development branch run
 ```
