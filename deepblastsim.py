@@ -72,9 +72,9 @@ def compute_similarity(x, y, model):
 
 def DeepBLAST(seq_list, uip, types):
     if types == 'peptide':
-        seq_all = read_fasta("savefeatures/peptides_subset_200.fasta")
+        seq_all = read_fasta("savefeatures/peptides_all.fasta")
     else:
-        seq_all = read_fasta("savefeatures/proteins_subset_200.fasta")
+        seq_all = read_fasta("savefeatures/proteins_all.fasta")
 
     seq_main = seq_list
 
