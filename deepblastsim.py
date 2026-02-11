@@ -72,14 +72,14 @@ def compute_similarity(x, y, model):
 
 def DeepBLAST(seq_list, uip, types):
     if types == 'peptide':
-        seq_all = read_fasta("/data/www/DCNPA/webserver/savefeatures/subset_test/peptides_subset_200.fasta")
+        seq_all = read_fasta("savefeatures/peptides_subset_200.fasta")
     else:
-        seq_all = read_fasta("/data/www/DCNPA/webserver/savefeatures/subset_test/proteins_subset_200.fasta")
+        seq_all = read_fasta("savefeatures/proteins_subset_200.fasta")
 
     seq_main = seq_list
 
-    model = load_model("/data/www/DCNPA/webserver/tools/DeepBLAST/deepblast-v3.ckpt", 
-                        "/data/www/KGIPA/webserver/tools/prot_t5_xl_uniref50",
+    model = load_model("/tools/DeepBLAST/deepblast-v3.ckpt", 
+                        "tools/prot_t5_xl_uniref50",
                         alignment_mode = 'smith-waterman').cuda()
 
     dict_name = os.path.join(uip, types+'_similarity_dict.pkl')
