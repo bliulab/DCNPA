@@ -59,6 +59,7 @@ IUPred2A \
 ncbi-blast 2.13.0
 ProtT5 \
 trRosetta \
+DeepBLAST \
 ```
 
 Databases and model:
@@ -66,6 +67,7 @@ Databases and model:
 nrdb90 [ncbi-blast Database](http://bliulab.net/DCNPA/static/download/nrdb90.tar.gz)
 uniclust30_2018_08 [HHsuite sequence Database](http://wwwuser.gwdg.de/~compbiol/uniclust/2018_08)
 model_res2net_202108 [Pre-trained network models of trRosetta](https://yanglab.qd.sdu.edu.cn/trRosetta/download/)
+DeepBLAST pretrained model [deepblast-v3.cpt](https://figshare.com/s/e414d6a52fd471d86d69)
 ```
 
 **The default paths to all tools and databases are shown in `conf.py`. You can change the paths to the tools and databases as needed by configuring `conf.py`.**
