@@ -53,7 +53,7 @@ def save_features_to_pkl(peptide_features, protein_features, save_dir):
 
 def run_db_in_venv(seq_list, uip, types):
     venv_python = "/data/webserver/anaconda3/envs/DeepBLAST/bin/python"
-    script_path = "/data/www/DCNPA/webserver/deepblastsim.py"
+    script_path = "deepblastsim.py"
     
     tmp_pkl = os.path.join(uip, f"input_seqs_{types}.pkl")
     with open(tmp_pkl, 'wb') as f:
