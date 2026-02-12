@@ -206,6 +206,24 @@ cd DCNPA/
 **Finally, configure the defalut path of the above tool and the database in `conf.py`. You can change the path of the tool and database by configuring `conf.py` as needed.**
 
 
+
+## 1.5 Download pre-extracted features
+Download pre-extracted peptide and protein features to accelerate the execution of the target adaptive dynamic context sub-network.
+To accelerate the execution of the Dynamic Context Network (DCNPA), we provide pre-extracted features for both peptides and proteins. Please download the required .pkl files and place them in the savefeatures/ directory.
+
+### Feature Files List
+
+| Feature Category | Peptide Features | Protein Features |
+| :--- | :--- | :--- |
+| **General Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_feature_dict.pkl) |
+| **T5 Embeddings** | [Download](http://bliulab.net/DCNPA/static/download/peptide_T5_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_T5_feature_dict.pkl) |
+| **Secondary Structure (SS)** | [Download](http://bliulab.net/DCNPA/static/download/peptide_ss_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_ss_feature_dict.pkl) |
+| **Edge Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_edge_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_edge_feature_dict.pkl) |
+| **Dense Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_dense_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_dense_feature_dict.pkl) |
+| **Type-2 Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_2_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_2_feature_dict.pkl) |
+
+
+
 # 2 Usage
 It takes 2 steps to predict peptide-protein binary interaction and peptide-protein-specific binding residues:
 
