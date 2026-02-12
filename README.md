@@ -215,20 +215,20 @@ To accelerate the execution of the Dynamic Context Network (DCNPA), we provide p
 
 | Feature Category | Peptide Features | Protein Features |
 | :--- | :--- | :--- |
-| **General Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_feature_dict.pkl) |
+| **Sequence Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_feature_dict.pkl) |
 | **T5 Embeddings** | [Download](http://bliulab.net/DCNPA/static/download/peptide_T5_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_T5_feature_dict.pkl) |
-| **Secondary Structure (SS)** | [Download](http://bliulab.net/DCNPA/static/download/peptide_ss_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_ss_feature_dict.pkl) |
+| **Secondary Structure** | [Download](http://bliulab.net/DCNPA/static/download/peptide_ss_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_ss_feature_dict.pkl) |
 | **Edge Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_edge_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_edge_feature_dict.pkl) |
 | **Dense Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_dense_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_dense_feature_dict.pkl) |
-| **Type-2 Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_2_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_2_feature_dict.pkl) |
+| **Physicochemical Properties** | [Download](http://bliulab.net/DCNPA/static/download/peptide_2_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_2_feature_dict.pkl) |
 
 
 # 2 Usage
 It takes 2 steps to predict peptide-protein binary interaction and peptide-protein-specific binding residues:
 
-(1) Replace the default peptide sequence in the `example/Peptide_Seq.fasta` file with your peptide sequence (FASTA format). Similarly, replace the default protein sequence in the `example/Protein_Seq.fasta` file with your protein sequence (FASTA format). If you don't want to do this, you can also test your own peptide-protein pairs by modifying the paths to the files passed in by the `run_predictor.py` script (the parameter is `-uip`, respectively).
+(1) Replace the default peptide sequence in the `example/Peptide_Seq.fasta` file with your own peptide sequence (FASTA format). Similarly, replace the default protein sequence in the `example/Protein_Seq.fasta` file with your protein sequence. Additionally, the `example/Env_All.fasta` file represents the multimer environment molecules. You can also replace this file with your own sequences based on your specific research requirements. If you don't want to do this, you can also test your own peptide-protein pairs by modifying the paths to the files passed in by the `run_predictor.py` script (the parameter is `-uip`, respectively).
 
-(2) Then, run `run_predictor.py` to make prediction, including **pairwise non-covalent interaction** prediction and **non-covalent bond type** identification. It should be noted that `run_predictor.py` automatically calls the scripts `FeatureExtract.py`, and `PSSMExtract.py` to generate the multi-source isomerization features of peptides and proteins.
+(2) Then, run `run_predictor.py` to make prediction, including **pairwise non-covalent interaction** prediction and **non-covalent bond type** identification. It should be noted that `run_predictor.py` automatically calls the scripts `FeatureExtract.py`, and `PSSMExtract.py` to generate the multi-source isomerization features of peptide, protein, and multimer molecules.
 ```
 conda activate dcnpa
 python run_predictor.py -uip example
