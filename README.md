@@ -193,6 +193,7 @@ If you have a GPU available, you can take advantage of accelerated database buil
 pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
 pip3 install faiss-gpu
 ```
+After installation, configure the `venv_python` variable within the `run_db_in_venv` function in `run_predictor.py`. Ensure it points to the absolute path of your DeepBLAST virtual environment's Python executable.
 
 
 
