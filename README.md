@@ -211,7 +211,7 @@ cd DCNPA/
 Download pre-extracted peptide and protein features to accelerate the execution of the target adaptive dynamic context sub-network.
 To accelerate the execution of the Dynamic Context Network (DCNPA), we provide pre-extracted features for both peptides and proteins. Please download the required .pkl files and place them in the savefeatures/ directory.
 
-### Feature Files List
+> **Tip**: If the download doesn't start after clicking, please **right-click** the link and select **"Save Link As..."** (due to browser security policies for HTTP links on GitHub).
 
 | Feature Category | Peptide Features | Protein Features |
 | :--- | :--- | :--- |
@@ -221,7 +221,6 @@ To accelerate the execution of the Dynamic Context Network (DCNPA), we provide p
 | **Edge Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_edge_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_edge_feature_dict.pkl) |
 | **Dense Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_dense_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_dense_feature_dict.pkl) |
 | **Type-2 Features** | [Download](http://bliulab.net/DCNPA/static/download/peptide_2_feature_dict.pkl) | [Download](http://bliulab.net/DCNPA/static/download/protein_2_feature_dict.pkl) |
-
 
 
 # 2 Usage
