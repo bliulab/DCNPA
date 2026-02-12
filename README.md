@@ -171,7 +171,7 @@ These changes are necessary to ensure DCNPA can correctly invoke trRosetta for s
 
 
 ### 1.3.6 How to install DeepBLAST
-Create a new virtual environment and activate it:
+Create a new virtual environment and activate it (More information, please see https://github.com/flatironinstitute/deepblast):
 ```
 python3 -m venv tmvec
 source tmvec/bin/activate
