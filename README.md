@@ -247,7 +247,7 @@ In addition, if you have any further questions about DCNPA, please feel free to 
 If you find our work useful, please cite us at
 ```
 @article{
-  title={Dynamic context networks integrating evolutionary priors and environmental constraints for deciphering peptide-protein multimeric interaction mechanisms},
+  title={Dynamic context networks integrating evolutionary priors and environmental constraints to decipher peptide-protein multimeric interaction mechanisms},
   author={Shutao Chen, Ke Yan, Tianqi Hu, Hongjun Yu, and Bin Liu},
   journal={submitted},
   year={2026},
