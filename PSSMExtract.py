@@ -13,15 +13,15 @@ sys.path.append('Utility')
 complet_n = 0
 
 def run_simple_search(fd):
-    protein_name = fd.split('.')[0]
+    protein_name = os.path.splitext(os.path.basename(fd))[0]
     global complet_n
     complet_n += 1
     print('Processing:%s---%d' % (protein_name, complet_n*1))
     outfmt_type = 5
     num_iter = 10
     evalue_threshold = 0.001
-    fasta_file = Profile_HOME + protein_name + '.fasta'
-    pssm_file = Profile_HOME + protein_name + '.pssm'
+    fasta_file = os.path.join(Profile_HOME, protein_name + '.fasta')
+    pssm_file = os.path.join(Profile_HOME, protein_name + '.pssm')
     if os.path.isfile(pssm_file):
         pass
     else:
@@ -101,13 +101,13 @@ def pssm_feature_extract(prolist, uip):
     BLAST = BLAST_FOLD
     BLAST_DB = BLAST_DB_FOLD
 
-    file_path = uip + 'Protein_Seq.fasta'
+    file_path = os.path.join(uip, 'Protein_Seq.fasta')
     
     global Profile_HOME
-    Profile_HOME = uip
+    Profile_HOME = os.path.abspath(uip)
     generateMSA(file_path)
     
-    proabb, prosequnique = Read_SeqID(uip + 'Protein_Seq.fasta')
+    proabb, prosequnique = Read_SeqID(file_path)
     
     protein_dense_feature_dict = {}
     for tmp in range(len(prosequnique)):
@@ -116,6 +116,5 @@ def pssm_feature_extract(prolist, uip):
             pssmfeature = read_pssm(os.path.join(uip, 'Protein_Seq.pssm'))[1]
         else:
             pssmfeature = get_protein_blosum(proseqtmp)
-        pssmfeature = get_protein_blosum(proseqtmp)
         protein_dense_feature_dict[prosequnique[tmp]] = pssmfeature
     return protein_dense_feature_dict

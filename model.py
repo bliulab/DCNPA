@@ -1,14 +1,9 @@
 # %%
 import torch
-import numpy as np
 from torch import nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
-from torch_geometric.utils import dense_to_sparse
 from torch.nn.utils.weight_norm import weight_norm
-from torch_geometric.nn import GCNConv, SAGEConv
-from torch_geometric.data import Data, Batch
-from torch_geometric.utils import dense_to_sparse
+from torch_geometric.nn import SAGEConv
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -90,7 +85,37 @@ class EnvAttention(nn.Module):
         out = torch.matmul(attn, v)
         return self.out_proj(out)
 
-def run_batched_gcn(feat, edge, mask, gcn1, gcn2):
+
+class FlexibleLayerNorm2d(nn.Module):
+    """LayerNorm that preserves checkpoint parameters across spatial sizes."""
+
+    def __init__(self, checkpoint_shape=(800, 50), eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(checkpoint_shape))
+        self.bias = nn.Parameter(torch.zeros(checkpoint_shape))
+
+    def forward(self, x):
+        target_shape = x.shape[-2:]
+        if tuple(self.weight.shape) == tuple(target_shape):
+            weight, bias = self.weight, self.bias
+        else:
+            resize_args = {
+                "size": target_shape,
+                "mode": "bilinear",
+                "align_corners": False,
+            }
+            weight = F.interpolate(
+                self.weight.unsqueeze(0).unsqueeze(0), **resize_args
+            ).squeeze(0).squeeze(0)
+            bias = F.interpolate(
+                self.bias.unsqueeze(0).unsqueeze(0), **resize_args
+            ).squeeze(0).squeeze(0)
+
+        return F.layer_norm(x, target_shape, weight, bias, self.eps)
+
+
+def run_batched_graphsage(feat, edge, mask, sage1, sage2):
     """
     Args:
         feat: Tensor (B, L, D)
@@ -119,9 +144,9 @@ def run_batched_gcn(feat, edge, mask, gcn1, gcn2):
             if n_nodes < 2:
                 idx = torch.zeros((2,0), dtype=torch.long, device=device)
 
-        # ----- GCN with Residual -----
-        x1 = F.relu(gcn1(node_feat, idx))  # First GCN layer
-        x2 = gcn2(x1, idx)                 # Second GCN layer
+        # ----- GraphSAGE with Residual -----
+        x1 = F.relu(sage1(node_feat, idx))  # First GraphSAGE layer
+        x2 = sage2(x1, idx)                 # Second GraphSAGE layer
         x = F.relu(node_feat + x2)         # Residual connection with input
 
         padded[i][node_mask] = x
@@ -222,11 +247,11 @@ class DCNPA(nn.Module):
         # The initial weight of the main interaction is slightly larger.
         self.raw_weight = nn.Parameter(torch.tensor([8.0, 1.0, 1.0, 2.0, 2.0]))
 
-        self.norm_origin = nn.LayerNorm([800, 50])
-        self.norm_sim_pep = nn.LayerNorm([800, 50])
-        self.norm_sim_pro = nn.LayerNorm([800, 50])
-        self.norm_mer_pep = nn.LayerNorm([800, 50])
-        self.norm_mer_pro = nn.LayerNorm([800, 50])
+        self.norm_origin = FlexibleLayerNorm2d()
+        self.norm_sim_pep = FlexibleLayerNorm2d()
+        self.norm_sim_pro = FlexibleLayerNorm2d()
+        self.norm_mer_pep = FlexibleLayerNorm2d()
+        self.norm_mer_pro = FlexibleLayerNorm2d()
 
         self.interaction_conv = nn.Sequential(
             nn.Conv2d(1, 4, kernel_size=3, padding=1),
@@ -271,9 +296,9 @@ class DCNPA(nn.Module):
         c1_pro, c2_pro, c3_pro, c4_pro = self.pro_convs(encode_protein)
         encode_protein_local = torch.cat([c1_pro, c2_pro, c3_pro, c4_pro], dim=-1)
 
-        # ================       GCN       ================
-        encode_peptide_space = run_batched_gcn(encode_peptide, peptide_edge_feature, peptide_mask, self.gcn_pep_1, self.gcn_pep_2)
-        encode_protein_space = run_batched_gcn(encode_protein, protein_edge_feature, protein_mask, self.gcn_pro_1, self.gcn_pro_2)
+        # ================       GraphSAGE       ================
+        encode_peptide_space = run_batched_graphsage(encode_peptide, peptide_edge_feature, peptide_mask, self.gcn_pep_1, self.gcn_pep_2)
+        encode_protein_space = run_batched_graphsage(encode_protein, protein_edge_feature, protein_mask, self.gcn_pro_1, self.gcn_pro_2)
         encode_peptide = torch.cat([encode_peptide_local, encode_peptide_space], dim=-1)
         encode_protein = torch.cat([encode_protein_local, encode_protein_space], dim=-1)
         encode_peptide = self.pep_proj_cat(encode_peptide) # torch.Size([8, 50, 128])
@@ -303,7 +328,7 @@ class DCNPA(nn.Module):
 
             c1_pep, c2_pep, c3_pep, c4_pep = self.pep_convs(feat)
             sim_pep_out_local = torch.cat([c1_pep, c2_pep, c3_pep, c4_pep], dim=-1)
-            sim_pep_out_space = run_batched_gcn(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pep_1, self.gcn_pep_2)
+            sim_pep_out_space = run_batched_graphsage(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pep_1, self.gcn_pep_2)
             sim_pep_out = torch.cat([sim_pep_out_local, sim_pep_out_space], -1)
             sim_pep_out = self.pep_proj_cat(sim_pep_out)
             pep_features = [encoder(sim_pep_out) for encoder in self.pep_transformer]
@@ -333,7 +358,7 @@ class DCNPA(nn.Module):
 
             c1_pro, c2_pro, c3_pro, c4_pro = self.pro_convs(feat)
             sim_pro_out_local = torch.cat([c1_pro, c2_pro, c3_pro, c4_pro], dim=-1)
-            sim_pro_out_space = run_batched_gcn(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pro_1, self.gcn_pro_2)
+            sim_pro_out_space = run_batched_graphsage(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pro_1, self.gcn_pro_2)
             sim_pro_out = torch.cat([sim_pro_out_local, sim_pro_out_space], -1)
             sim_pro_out = self.pro_proj_cat(sim_pro_out)
             pro_features = [encoder(sim_pro_out) for encoder in self.pro_transformer]
@@ -362,7 +387,7 @@ class DCNPA(nn.Module):
 
             c1_pro, c2_pro, c3_pro, c4_pro = self.pro_convs(feat)
             mer_pep_out_local = torch.cat([c1_pro, c2_pro, c3_pro, c4_pro], dim=-1)
-            mer_pep_out_space = run_batched_gcn(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pro_1, self.gcn_pro_2)
+            mer_pep_out_space = run_batched_graphsage(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pro_1, self.gcn_pro_2)
             mer_pep_out = torch.cat([mer_pep_out_local, mer_pep_out_space], -1)
             mer_pep_out = self.pro_proj_cat(mer_pep_out)
             pro_features = [encoder(mer_pep_out) for encoder in self.pro_transformer]
@@ -391,7 +416,7 @@ class DCNPA(nn.Module):
 
             c1_pep, c2_pep, c3_pep, c4_pep = self.pep_convs(feat)
             mer_pro_out_local = torch.cat([c1_pep, c2_pep, c3_pep, c4_pep], dim=-1)
-            mer_pro_out_space = run_batched_gcn(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pep_1, self.gcn_pep_2)
+            mer_pro_out_space = run_batched_graphsage(feat, edge, feat.abs().sum(dim=-1) > 0, self.gcn_pep_1, self.gcn_pep_2)
             mer_pro_out = torch.cat([mer_pro_out_local, mer_pro_out_space], -1)
             mer_pro_out = self.pep_proj_cat(mer_pro_out)
             pep_features = [encoder(mer_pro_out) for encoder in self.pep_transformer]

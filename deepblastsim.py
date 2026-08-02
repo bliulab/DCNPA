@@ -19,6 +19,16 @@ warnings.filterwarnings("ignore", message="You are using the default legacy beha
 import logging
 logging.basicConfig(level=logging.INFO)
 
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def configured_path(env_name, default_relative_path):
+    """Resolve a local model path, allowing an environment override."""
+    configured = os.environ.get(
+        env_name, os.path.join(PROJECT_ROOT, default_relative_path)
+    )
+    return os.path.abspath(os.path.expanduser(configured))
+
 # %%
 def CountStr(pred_alignment, x, y):
     count = 0
@@ -72,15 +82,36 @@ def compute_similarity(x, y, model):
 
 def DeepBLAST(seq_list, uip, types):
     if types == 'peptide':
-        seq_all = read_fasta("savefeatures/peptides_all.fasta")
+        sequence_db = os.path.join(PROJECT_ROOT, "savefeatures", "peptides_all.fasta")
     else:
-        seq_all = read_fasta("savefeatures/proteins_all.fasta")
+        sequence_db = os.path.join(PROJECT_ROOT, "savefeatures", "proteins_all.fasta")
+
+    seq_all = read_fasta(sequence_db)
 
     seq_main = seq_list
 
-    model = load_model("/tools/DeepBLAST/deepblast-v3.ckpt", 
-                        "tools/prot_t5_xl_uniref50",
-                        alignment_mode = 'smith-waterman').cuda()
+    checkpoint_path = configured_path(
+        "DEEPBLAST_CHECKPOINT", os.path.join("tools", "DeepBLAST", "deepblast-v3.ckpt")
+    )
+    prot_t5_path = configured_path(
+        "PROT_T5_MODEL", os.path.join("tools", "prot_t5_xl_uniref50")
+    )
+    for env_name, model_path in (
+        ("DEEPBLAST_CHECKPOINT", checkpoint_path),
+        ("PROT_T5_MODEL", prot_t5_path),
+    ):
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                f"Required model path not found: {model_path}. "
+                f"Set {env_name} to the installed location."
+            )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_model(
+        checkpoint_path,
+        prot_t5_path,
+        alignment_mode='smith-waterman'
+    ).to(device)
 
     dict_name = os.path.join(uip, types+'_similarity_dict.pkl')
 

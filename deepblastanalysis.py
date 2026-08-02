@@ -78,21 +78,22 @@ def DeepAnalysis(seq_list, deepblast_dict_path, T5_feature):
     with open(deepblast_dict_path, "rb") as f:
         similarity_deepblast_dict = pickle.load(f)
 
-    for tmp in tqdm(range(len(seq_list)), desc="Processing complex_ids"):
+    # Collect the environments once, preserving one result group per input sequence.
+    simenv = get_similarity_env(seq_list, similarity_deepblast_dict, T5_feature)
+    simenv_seq = extract_last_element_from_nested_lists(simenv)
 
-        # Collect features of environment peptides and environment proteins
-        simenv = get_similarity_env(seq_list, similarity_deepblast_dict, T5_feature)
-        simenv_seq = extract_last_element_from_nested_lists(simenv)[0]
-
-        # Masks corresponding to environment peptides and proteins
-        # Used to store residue-level alignment (ResAlign) results
+    all_sim_masks, all_sim_indices = [], []
+    for sequence_env in tqdm(simenv, desc="Processing complex_ids"):
+        # Masks corresponding to one input sequence's environments.
+        # These retain the batch dimension instead of being overwritten.
         sim_mask, sim_indices = [], []
-        for envtmp in range(len(simenv[0])):
-            sim_info = simenv[0][envtmp]
+        for sim_info in sequence_env:
             mask_tmp, indices_tmp = build_mask_from_peptide_simenv(sim_info)
             sim_mask.append(mask_tmp)
             sim_indices.append(indices_tmp)
+        all_sim_masks.append(sim_mask)
+        all_sim_indices.append(sim_indices)
 
-    return simenv_seq, sim_mask, sim_indices
+    return simenv_seq, all_sim_masks, all_sim_indices
 
 # %%

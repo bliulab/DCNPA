@@ -5,6 +5,7 @@ import csv
 import torch
 import pickle
 import argparse
+import subprocess
 import numpy as np
 from itertools import chain
 
@@ -52,8 +53,19 @@ def save_features_to_pkl(peptide_features, protein_features, save_dir):
 
 
 def run_db_in_venv(seq_list, uip, types):
-    venv_python = "/data/webserver/anaconda3/envs/DeepBLAST/bin/python"
-    script_path = "deepblastsim.py"
+    venv_python = os.path.expanduser(
+        os.environ.get("DEEPBLAST_PYTHON", sys.executable)
+    )
+    script_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "deepblastsim.py"
+    )
+
+    if not os.path.isfile(venv_python):
+        raise FileNotFoundError(
+            f"DeepBLAST Python executable not found: {venv_python}. "
+            "Set DEEPBLAST_PYTHON to the Python executable in the "
+            "environment where DeepBLAST is installed."
+        )
     
     tmp_pkl = os.path.join(uip, f"input_seqs_{types}.pkl")
     with open(tmp_pkl, 'wb') as f:
@@ -83,7 +95,8 @@ def clean_uip_directory(uip_path):
             if filename not in keep_filenames:
                 try:
                     os.remove(file_path)
-                except Exception as e:
+                except OSError as exc:
+                    logging.warning("Could not remove %s: %s", file_path, exc)
 
 def SeqMask(seqlen_list, seqlen_lim, device):
     seq_mask = torch.zeros((len(seqlen_list), seqlen_lim), dtype=torch.float32)
@@ -161,6 +174,31 @@ def pad_and_stack_contact_maps(
                 result[i, j, range(L), range(L)] = 1.0
 
     return torch.from_numpy(result)
+
+
+def pad_alignment_data(mask_groups, index_groups, max_len):
+    """Pad residue-alignment metadata to tensors shaped [B, N, L]."""
+    batch_size = len(mask_groups)
+    max_num_env = max((len(group) for group in mask_groups), default=0)
+    masks = torch.ones((batch_size, max_num_env, max_len), dtype=torch.float32)
+    indices = torch.full(
+        (batch_size, max_num_env, max_len), -2, dtype=torch.long
+    )
+
+    for batch_index, (batch_masks, batch_indices) in enumerate(
+        zip(mask_groups, index_groups)
+    ):
+        for env_index, (mask, env_indices) in enumerate(
+            zip(batch_masks, batch_indices)
+        ):
+            mask_values = torch.as_tensor(mask, dtype=torch.float32).reshape(-1)
+            index_values = torch.as_tensor(env_indices, dtype=torch.long).reshape(-1)
+            length = min(mask_values.numel(), index_values.numel(), max_len)
+            masks[batch_index, env_index, :length] = mask_values[:length]
+            indices[batch_index, env_index, :length] = index_values[:length]
+
+    return masks, indices
+
 
 def DCNPA_Predict(peptide_seq_feature, protein_seq_feature, peptide_ss_feature, protein_ss_feature,
                                                                 peptide_2_feature, protein_2_feature, peptide_pretrain_feature, protein_pretrain_feature, 
@@ -277,8 +315,15 @@ if __name__ == '__main__':
                 with open(file_path, 'rb') as f:
                     feats[dict_key] = pickle.load(f, encoding='iso-8859-1')
 
-        peptide_simenv_seq, peptide_sim_mask, peptide_sim_index = DeepAnalysis(pep_seq_list, os.path.join(uip, 'peptide_similarity_dict.pkl'), feats['peptide_T5_feature'])
-        protein_simenv_seq, protein_sim_mask, protein_sim_index = DeepAnalysis(pro_seq_list, os.path.join(uip, 'protein_similarity_dict.pkl'), feats['protein_T5_feature'])
+        peptide_simenv_seq, peptide_sim_masks, peptide_sim_indices = DeepAnalysis(pep_seq_list, os.path.join(uip, 'peptide_similarity_dict.pkl'), feats['peptide_T5_feature'])
+        protein_simenv_seq, protein_sim_masks, protein_sim_indices = DeepAnalysis(pro_seq_list, os.path.join(uip, 'protein_similarity_dict.pkl'), feats['protein_T5_feature'])
+
+        peptide_sim_mask, peptide_sim_index = pad_alignment_data(
+            peptide_sim_masks, peptide_sim_indices, 50
+        )
+        protein_sim_mask, protein_sim_index = pad_alignment_data(
+            protein_sim_masks, protein_sim_indices, 800
+        )
 
         peptide_simenv_seq_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, feats['peptide_feature'], 50).long()
         protein_simenv_seq_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_feature'], 800).long()

@@ -290,9 +290,6 @@ def pretrain_feature_extract(seqlist, uip, seqtype, seq_max_length):
             print('error!')
             break
     
-    seq_tmp = list(pretrain_feature_dict)[0]
-    pretrain_tmp = pretrain_feature_dict[seq_tmp][True, :]
-    pretrain_feature_dict[seq_tmp] = pretrain_tmp[0]
     out = batch_feature(seqlist, pretrain_feature_dict, seq_max_length, 'float')
     return out.to(torch.float32)
 
