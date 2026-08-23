@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
 import os
 import sys
 import csv
@@ -86,7 +92,7 @@ def clean_uip_directory(uip_path):
     if not os.path.exists(uip_path):
         return
 
-    keep_filenames = {'do_shap.txt', 'Peptide_Main.fasta', 'Protein_Main.fasta', 'Env_All.fasta'}
+    keep_filenames = {'use_deepblast.txt', 'Peptide_Main.fasta', 'Protein_Main.fasta', 'Env_All.fasta'}
 
     for filename in os.listdir(uip_path):
         file_path = os.path.join(uip_path, filename)
@@ -104,6 +110,16 @@ def SeqMask(seqlen_list, seqlen_lim, device):
         seq_mask[i, :length] = 1.0
     seq_mask = seq_mask.to(device)
     return seq_mask
+
+
+def get_nested_max_seq_len(seqs_nested, fallback_len):
+    """Return the real maximum sequence length in a nested sequence list.
+
+    If the nested list contains no sequence, use ``fallback_len`` so that
+    downstream empty-context tensors still have a valid residue dimension.
+    """
+    lengths = [len(seq) for group in seqs_nested for seq in group]
+    return max(lengths) if lengths else fallback_len
 
 def pad_and_stack_nested_tensor(
     seqs_nested: List[List[str]],
@@ -259,7 +275,7 @@ def DCNPA_Predict(peptide_seq_feature, protein_seq_feature, peptide_ss_feature, 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-uip", required=True, help="User dir")
-    parser.add_argument("-do_shap", default="0", help="Whether to run SHAP (0/1)")
+    parser.add_argument("-use_deepblast", default="0", help="Whether to use DeepBLAST (0/1)")
     args = parser.parse_args()
     uip = args.uip
     
@@ -285,16 +301,25 @@ if __name__ == '__main__':
     pep_len = [len(pep_seq_list[0])]
     pro_len = [len(pro_seq_list[0])]
 
-    peptide_mask = SeqMask(pep_len, 50, device)  # torch.Size([16, 50])
-    protein_mask = SeqMask(pro_len, 800, device)  # torch.Size([16, 800])
+    # Protein-related residue dimensions are dynamic during inference.
+    # The peptide branch remains unchanged at the training-time limit of 50 aa.
+    protein_target_len = max(pro_len)
+
+    peptide_mask = SeqMask(pep_len, 50, device)
+    protein_mask = SeqMask(pro_len, protein_target_len, device)
+
+    logging.info("Peptide length: %d aa", pep_len[0])
+    logging.info("Protein length used for inference: %d aa", protein_target_len)
     
-    do_shap = args.do_shap.lower() in ["1", "true", "yes"]
+    use_deepblast = args.use_deepblast.lower() in ["1", "true", "yes"]
     
-    if do_shap:
+    if use_deepblast:
         run_db_in_venv(pep_seq_list, uip, 'peptide')
         run_db_in_venv(pro_seq_list, uip, 'protein')
 
-        base_path = 'savefeatures/'
+        # 2026-08-23代码检查
+        # base_path = 'savefeatures/'
+        base_path = '/home/chenst/DCNPA/Features'
         prefixes = ['peptide', 'protein']
         feat_mapping = {
             '': 'feature', 
@@ -322,37 +347,37 @@ if __name__ == '__main__':
             peptide_sim_masks, peptide_sim_indices, 50
         )
         protein_sim_mask, protein_sim_index = pad_alignment_data(
-            protein_sim_masks, protein_sim_indices, 800
+            protein_sim_masks, protein_sim_indices, protein_target_len
         )
 
         peptide_simenv_seq_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, feats['peptide_feature'], 50).long()
-        protein_simenv_seq_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_feature'], 800).long()
+        protein_simenv_seq_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_feature'], protein_target_len).long()
         peptide_simenv_ss_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, feats['peptide_ss_feature'], 50).long()
-        protein_simenv_ss_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_ss_feature'], 800).long()
+        protein_simenv_ss_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_ss_feature'], protein_target_len).long()
         peptide_simenv_2_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, feats['peptide_2_feature'], 50).long()
-        protein_simenv_2_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_2_feature'], 800).long()
+        protein_simenv_2_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_2_feature'], protein_target_len).long()
         peptide_simenv_pretrain_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, feats['peptide_T5_feature'], 50)
-        protein_simenv_pretrain_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_T5_feature'], 800)
+        protein_simenv_pretrain_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_T5_feature'], protein_target_len)
         peptide_simenv_dense_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, feats['peptide_dense_feature'], 50)
-        protein_simenv_dense_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_dense_feature'], 800)
+        protein_simenv_dense_padded = pad_and_stack_nested_tensor(protein_simenv_seq, feats['protein_dense_feature'], protein_target_len)
         peptide_simenv_edge_padded = pad_and_stack_contact_maps(peptide_simenv_seq, feats['peptide_edge_feature'], 50)
-        protein_simenv_edge_padded = pad_and_stack_contact_maps(protein_simenv_seq, feats['protein_edge_feature'], 800)
+        protein_simenv_edge_padded = pad_and_stack_contact_maps(protein_simenv_seq, feats['protein_edge_feature'], protein_target_len)
     else:
         peptide_simenv_seq, protein_simenv_seq = [[]], [[]]
         peptide_sim_mask, peptide_sim_index, protein_sim_mask, protein_sim_index = [], [], [], []
 
         peptide_simenv_seq_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, {}, 50).long()
-        protein_simenv_seq_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, 800).long()
+        protein_simenv_seq_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, protein_target_len).long()
         peptide_simenv_ss_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, {}, 50).long()
-        protein_simenv_ss_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, 800).long()
+        protein_simenv_ss_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, protein_target_len).long()
         peptide_simenv_2_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, {}, 50).long()
-        protein_simenv_2_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, 800).long()
+        protein_simenv_2_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, protein_target_len).long()
         peptide_simenv_pretrain_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, {}, 50)
-        protein_simenv_pretrain_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, 800)
+        protein_simenv_pretrain_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, protein_target_len)
         peptide_simenv_dense_padded = pad_and_stack_nested_tensor(peptide_simenv_seq, {}, 50)
-        protein_simenv_dense_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, 800)
+        protein_simenv_dense_padded = pad_and_stack_nested_tensor(protein_simenv_seq, {}, protein_target_len)
         peptide_simenv_edge_padded = pad_and_stack_contact_maps(peptide_simenv_seq, {}, 50)
-        protein_simenv_edge_padded = pad_and_stack_contact_maps(protein_simenv_seq, {}, 800)
+        protein_simenv_edge_padded = pad_and_stack_contact_maps(protein_simenv_seq, {}, protein_target_len)
 
 
 
@@ -372,6 +397,18 @@ if __name__ == '__main__':
                     protein_merenv_seq[0].append(seq)
                 else:
                     peptide_merenv_seq[0].append(seq)
+
+    # ``peptide_merenv_seq`` stores protein-like environmental chains (>50 aa)
+    # in the original naming convention. Pad these chains to their real maximum
+    # length instead of truncating them to a fixed protein length.
+    protein_merenv_max_len = get_nested_max_seq_len(
+        peptide_merenv_seq,
+        fallback_len=protein_target_len
+    )
+    logging.info(
+        "Maximum protein-like environmental-chain length: %d aa",
+        protein_merenv_max_len
+    )
 
     protein_feature_dict_merenv, protein_ss_feature_dict_merenv = {}, {}
     protein_2_feature_dict_merenv, protein_T5_feature_dict_merenv = {}, {}
@@ -406,17 +443,17 @@ if __name__ == '__main__':
         peptide_edge_feature_dict_merenv[p_seq]   = p_feats[5][0]
         clean_uip_directory(uip)
 
-    peptide_merenv_seq_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_feature_dict_merenv, 800).long()
+    peptide_merenv_seq_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_feature_dict_merenv, protein_merenv_max_len).long()
     protein_merenv_seq_padded = pad_and_stack_nested_tensor(protein_merenv_seq, peptide_feature_dict_merenv, 50).long()
-    peptide_merenv_ss_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_ss_feature_dict_merenv, 800).long()
+    peptide_merenv_ss_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_ss_feature_dict_merenv, protein_merenv_max_len).long()
     protein_merenv_ss_padded = pad_and_stack_nested_tensor(protein_merenv_seq, peptide_ss_feature_dict_merenv, 50).long()
-    peptide_merenv_2_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_2_feature_dict_merenv, 800).long()
+    peptide_merenv_2_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_2_feature_dict_merenv, protein_merenv_max_len).long()
     protein_merenv_2_padded = pad_and_stack_nested_tensor(protein_merenv_seq, peptide_2_feature_dict_merenv, 50).long()
-    peptide_merenv_pretrain_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_T5_feature_dict_merenv, 800)
+    peptide_merenv_pretrain_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_T5_feature_dict_merenv, protein_merenv_max_len)
     protein_merenv_pretrain_padded = pad_and_stack_nested_tensor(protein_merenv_seq, peptide_T5_feature_dict_merenv, 50)
-    peptide_merenv_dense_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_dense_feature_dict_merenv, 800)
+    peptide_merenv_dense_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_dense_feature_dict_merenv, protein_merenv_max_len)
     protein_merenv_dense_padded = pad_and_stack_nested_tensor(protein_merenv_seq, peptide_dense_feature_dict_merenv, 50)
-    peptide_merenv_edge_padded = pad_and_stack_contact_maps(peptide_merenv_seq, protein_edge_feature_dict_merenv, 800)
+    peptide_merenv_edge_padded = pad_and_stack_contact_maps(peptide_merenv_seq, protein_edge_feature_dict_merenv, protein_merenv_max_len)
     protein_merenv_edge_padded = pad_and_stack_contact_maps(protein_merenv_seq, peptide_edge_feature_dict_merenv, 50)
 
     
