@@ -1,4 +1,11 @@
 # %%
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# %%
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -248,8 +255,6 @@ class DCNPA(nn.Module):
         self.raw_weight = nn.Parameter(torch.tensor([8.0, 1.0, 1.0, 2.0, 2.0]))
 
         self.norm_origin = FlexibleLayerNorm2d()
-        self.norm_sim_pep = FlexibleLayerNorm2d()
-        self.norm_sim_pro = FlexibleLayerNorm2d()
         self.norm_mer_pep = FlexibleLayerNorm2d()
         self.norm_mer_pro = FlexibleLayerNorm2d()
 
