@@ -317,9 +317,7 @@ if __name__ == '__main__':
         run_db_in_venv(pep_seq_list, uip, 'peptide')
         run_db_in_venv(pro_seq_list, uip, 'protein')
 
-        # 2026-08-23代码检查
-        # base_path = 'savefeatures/'
-        base_path = '/home/chenst/DCNPA/Features'
+        base_path = 'savefeatures/'
         prefixes = ['peptide', 'protein']
         feat_mapping = {
             '': 'feature', 
