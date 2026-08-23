@@ -24,7 +24,7 @@ def save_to_fasta(seqlist, seqtype, uip_path):
 
 # Total protein feature extraction script
 def protein_feature_extract(prolist, uip):
-    protein_max_length = 800
+    protein_max_length = max(len(seq) for seq in prolist)
     save_to_fasta(prolist, "Protein", uip)
     
     # Define the function task for each feature extraction
@@ -97,4 +97,3 @@ def parallel_feature_extract(pro_seq_list, pep_seq_list, uip, delay=30):
     logging.info("✅ Peptide features completed")
     
     return protein_features, peptide_features
-
