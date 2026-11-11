@@ -1,65 +1,22 @@
 # -*- coding: utf-8 -*-
-# %%
-import time
-import argparse
+import logging
+import os
+import subprocess
+import tempfile
 import numpy as np
 from Bio import SeqIO
-import sys, os, subprocess
-from multiprocessing import Pool
 
 from conf import *
-sys.path.append('Utility')
 
-complet_n = 0
+LOGGER = logging.getLogger(__name__)
 
-def run_simple_search(fd):
-    protein_name = os.path.splitext(os.path.basename(fd))[0]
-    global complet_n
-    complet_n += 1
-    print('Processing:%s---%d' % (protein_name, complet_n*1))
-    outfmt_type = 5
-    num_iter = 10
-    evalue_threshold = 0.001
-    fasta_file = os.path.join(Profile_HOME, protein_name + '.fasta')
-    pssm_file = os.path.join(Profile_HOME, protein_name + '.pssm')
-    if os.path.isfile(pssm_file):
-        pass
-    else:
-        cmd = ' '.join([BLAST,
-                        '-query ' + fasta_file,
-                        '-db ' + BLAST_DB,
-                        '-evalue ' + str(evalue_threshold),
-                        '-num_iterations ' + str(num_iter),
-                        '-outfmt ' + str(outfmt_type),
-                        '-out_ascii_pssm ' + pssm_file,  # Write the pssm file
-                        '-num_threads ' + '1']
-                       )
-        process = subprocess.Popen(cmd, shell=True)
-        process.wait()
-
-def generateMSA(file_path):
-    seq_DIR = ['Protein_Seq.fasta']
-    pssm_dir = Profile_HOME
-
-    pool = Pool(1)
-    results = pool.map(run_simple_search, seq_DIR)
-    pool.close()
-    pool.join()
 
 def Read_SeqID(FilePath):
-    f0 = open(FilePath, 'r')
-    lines = f0.readlines()
-    count = 0
-    info1 = []
-    info2 = []
-    for line in lines:
-        if count % 2 == 0:
-            info1.append(line.strip('\n').strip('>'))
-        else:
-            info2.append(line.strip('\n'))
-        count += 1
-    f0.close()
-    return info1, info2
+    """Return FASTA descriptions and full sequences (including wrapped FASTA)."""
+    with open(FilePath, encoding='utf-8') as handle:
+        records = list(SeqIO.parse(handle, 'fasta'))
+    return [rec.description for rec in records], [str(rec.seq).upper() for rec in records]
+
 
 def get_protein_blosum(proteinseq):
     blosum62 = {}
@@ -81,40 +38,122 @@ def get_protein_blosum(proteinseq):
     return np.asarray(protein_lst)
 
 def read_pssm(pssm_file):
-    with open(pssm_file, 'r') as f:
-        lines = f.readlines()
-        lines = lines[3:-6]
-        pro_seq = []
-        mat = []
-        for line in lines:
-            tmp = line.strip('\n').split()
-            pro_seq.append(tmp[1])
-            tmp = tmp[2:22]
-            mat.append(tmp)
-        mat = np.array(mat)
-        mat = mat.astype(float)
-    return pro_seq, mat
+    """Parse PSI-BLAST ASCII PSSM residues and their original 20 score columns."""
+    residues = []
+    rows = []
+    positions = []
+    with open(pssm_file, 'r', encoding='utf-8', errors='replace') as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) < 22 or not parts[0].isdigit():
+                continue
+            if len(parts[1]) != 1 or not parts[1].isalpha():
+                continue
+            try:
+                values = [float(x) for x in parts[2:22]]
+            except ValueError:
+                continue
+            positions.append(int(parts[0]))
+            residues.append(parts[1].upper())
+            rows.append(values)
+
+    if not positions or positions != list(range(1, len(positions) + 1)):
+        raise ValueError(f'Incomplete or invalid ASCII PSSM: {pssm_file}')
+    return residues, np.asarray(rows, dtype=np.float64)
+
+
+def _matching_pssm(pssm_file, expected_sequence):
+    """Return PSSM scores only when they belong to the exact query protein."""
+    if not os.path.isfile(pssm_file):
+        return None
+    try:
+        residues, matrix = read_pssm(pssm_file)
+    except (OSError, ValueError, IndexError) as exc:
+        LOGGER.warning('PSSM unreadable (%s): %s', pssm_file, exc)
+        return None
+    if ''.join(residues) != expected_sequence or matrix.shape != (len(expected_sequence), 20):
+        LOGGER.warning('Cached PSSM does not match current protein; will regenerate: %s', pssm_file)
+        return None
+    return matrix
+
+
+def run_simple_search(fd, output_path=None):
+    """Run PSI-BLAST for one FASTA; return success status, not cached results."""
+    input_fasta = os.path.abspath(fd)
+    if output_path is None:
+        output_path = os.path.splitext(input_fasta)[0] + '.pssm'
+    cmd = [
+        str(BLAST_FOLD),
+        '-query', input_fasta,
+        '-db', str(BLAST_DB_FOLD),
+        '-evalue', '0.001',
+        '-num_iterations', '10',
+        '-outfmt', '5',
+        '-out_ascii_pssm', output_path,
+        '-num_threads', '1',
+    ]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, text=True, check=False)
+    except (OSError, ValueError) as exc:
+        LOGGER.warning('PSI-BLAST could not be started: %s', exc)
+        return False
+    if result.returncode != 0:
+        LOGGER.warning('PSI-BLAST failed (exit %d): %s',
+                       result.returncode, (result.stderr or '').strip()[-500:])
+        return False
+    return True
+
+
+def generateMSA(file_path):
+    """Use a verified cached profile or regenerate it without trusting stale data."""
+    _, sequences = Read_SeqID(file_path)
+    if len(sequences) != 1 or not sequences[0]:
+        raise ValueError('Protein_Seq.fasta must contain exactly one nonempty protein sequence.')
+    sequence = sequences[0]
+    pssm_path = os.path.join(os.path.dirname(os.path.abspath(file_path)), 'Protein_Seq.pssm')
+
+    if _matching_pssm(pssm_path, sequence) is not None:
+        LOGGER.info('Reusing sequence-validated PSSM for protein length %d', len(sequence))
+        return pssm_path
+
+    # Write into an isolated temporary path.  Do not overwrite an existing
+    # cache until the new PSSM has been validated against the current protein.
+    fd, tmp_path = tempfile.mkstemp(prefix='.Protein_Seq_', suffix='.pssm',
+                                    dir=os.path.dirname(os.path.abspath(file_path)))
+    os.close(fd)
+    os.remove(tmp_path)
+    try:
+        if run_simple_search(file_path, output_path=tmp_path):
+            if _matching_pssm(tmp_path, sequence) is not None:
+                os.replace(tmp_path, pssm_path)
+                return pssm_path
+            LOGGER.warning('PSI-BLAST output PSSM is invalid for current sequence.')
+    finally:
+        if os.path.isfile(tmp_path):
+            os.remove(tmp_path)
+
+    return None
+
 
 def pssm_feature_extract(prolist, uip):
-    global BLAST
-    global BLAST_DB
-    BLAST = BLAST_FOLD
-    BLAST_DB = BLAST_DB_FOLD
-
+    """Extract one protein profile; never associate another protein's PSSM."""
     file_path = os.path.join(uip, 'Protein_Seq.fasta')
-    
-    global Profile_HOME
-    Profile_HOME = os.path.abspath(uip)
-    generateMSA(file_path)
-    
-    proabb, prosequnique = Read_SeqID(file_path)
-    
-    protein_dense_feature_dict = {}
-    for tmp in range(len(prosequnique)):
-        proseqtmp = prosequnique[tmp]
-        if os.path.exists(os.path.join(uip, 'Protein_Seq.pssm')):
-            pssmfeature = read_pssm(os.path.join(uip, 'Protein_Seq.pssm'))[1]
-        else:
-            pssmfeature = get_protein_blosum(proseqtmp)
-        protein_dense_feature_dict[prosequnique[tmp]] = pssmfeature
-    return protein_dense_feature_dict
+    _, sequences = Read_SeqID(file_path)
+    if len(sequences) != 1:
+        raise ValueError('PSSMExtract supports exactly one protein sequence per call.')
+    sequence = sequences[0]
+    if not sequence:
+        raise ValueError('Protein sequence must not be empty.')
+
+    if prolist is not None:
+        if len(prolist) != 1 or str(prolist[0]).upper() != sequence:
+            raise ValueError('Protein sequence and Protein_Seq.fasta are inconsistent; '
+                             'multi-sequence PSSM reuse is not supported.')
+
+    pssm_path = generateMSA(file_path)
+    scores = _matching_pssm(pssm_path, sequence) if pssm_path else None
+    if scores is None:
+        LOGGER.warning('No valid PSI-BLAST PSSM; using original BLOSUM62 fallback.')
+        scores = get_protein_blosum(sequence)
+    return {sequence: scores}
