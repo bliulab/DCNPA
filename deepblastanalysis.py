@@ -1,99 +1,91 @@
-# %%
-import torch
+import logging
 import pickle
+import torch
 from tqdm import tqdm
 
-# %%
+LOGGER = logging.getLogger(__name__)
+
+
 def get_similarity_env(batch_seq, similarity_dict, feature_dict):
+    """Read canonical query->list-of-5-field-hits; filter missing features.
+
+    Never mutate the cache in memory, as other queries may share records.
     """
-    Extract and filter environment information that is similar to
-    sequences in batch_seq. Only entries whose last element exists in feature_dict are retained.
-    """
-    sim_env = [similarity_dict.get(seq, []) for seq in batch_seq]
-    
-    for i in range(len(sim_env) - 1, -1, -1):
-        for j in range(len(sim_env[i]) - 1, -1, -1):
-            if sim_env[i][j][-1] not in feature_dict:
-                del sim_env[i][j]
+    if not isinstance(similarity_dict, dict):
+        raise ValueError('Expected a dictionary keyed by target sequences')
+    sim_env = []
+    for seq in batch_seq:
+        candidates = similarity_dict.get(seq, [])
+        if not isinstance(candidates, (list, tuple)):
+            raise ValueError(f'Expected a list of templates for {seq[:25]}')
+        selected = []
+        missing = 0
+        for record in candidates:
+            if not isinstance(record, (list, tuple)) or len(record) != 5:
+                raise ValueError('Incorrect DeepBLAST record format; expected '
+                                 '[target_aln, alignment, template_aln, score, raw_template_seq]')
+            target_aln, alignment, template_aln, score, raw_template_seq = record
+            if raw_template_seq not in feature_dict:
+                missing += 1
+                continue
+            if not all(isinstance(s, str) for s in (target_aln, alignment, template_aln)):
+                raise ValueError('DeepBLAST alignment components must be strings')
+            if not (len(target_aln) == len(alignment) == len(template_aln)):
+                raise ValueError('DeepBLAST aligned strings have inconsistent lengths')
+            # Original mask construction assumes all target residues are represented.
+            if target_aln.replace('-', '') != seq:
+                LOGGER.warning('Skipping partial or mismatched query alignment: %s / %s',
+                               seq[:20], raw_template_seq[:20])
+                continue
+            # Similarly, template indices are relative to the raw template sequence.
+            if template_aln.replace('-', '') != raw_template_seq[:len(template_aln.replace('-', ''))]:
+                LOGGER.warning('Skipping template alignment without resolvable raw coordinates: %s',
+                               raw_template_seq[:20])
+                continue
+            selected.append(list(record))
+        LOGGER.info('DeepAnalysis query=%s... retrieved=%d usable=%d missing_features=%d',
+                    seq[:16], len(candidates), len(selected), missing)
+        sim_env.append(selected)
     return sim_env
 
+
 def extract_last_element_from_nested_lists(nested_list):
-    """
-    Extracts the last element from each inner list of a nested list.
+    return [[record[-1] for record in group] for group in nested_list]
 
-    Args:
-        nested_list (list): A list of lists, where each inner list contains elements.
-
-    Returns:
-        list: A new list containing the last element of each inner list.
-    """
-    return [[sublist[-1] for sublist in outer_list] for outer_list in nested_list]
 
 def build_mask_from_peptide_simenv(sim_info):
-    """
-    Given one record from peptide_simenv, return:
-    - mask tensor: shape [L_target, 1]
-    - env_indices: List[int], corresponding indices in the environment
-      protein (-1 indicates no match)
-
-    Args:
-        sim_info: list with the structure
-                  [target_aln, alignment, env_aln, score, raw_seq]
-
-    Returns:
-        mask: torch.FloatTensor of shape [L_target, 1]
-        env_indices: list of int
-    """
     target_aln, alignment, env_aln = sim_info[0], sim_info[1], sim_info[2]
-
     mask_list = []
     env_indices = []
-    t_idx, e_idx = 0, 0
-
+    e_idx = 0
     for t_res, a_char, e_res in zip(target_aln, alignment, env_aln):
         if t_res == '-':
             if e_res != '-':
                 e_idx += 1
             continue
-
         if a_char == ':' and e_res != '-':
-            mask_list.append(0.0)
+            mask_list.append(0.0)  # 0: use template feature (code convention)
             env_indices.append(e_idx)
         else:
-            mask_list.append(1.0)
+            mask_list.append(1.0)  # 1: use target feature
             env_indices.append(-1)
-
         if e_res != '-':
             e_idx += 1
-        t_idx += 1
-
-    mask = torch.tensor(mask_list, dtype=torch.float32).unsqueeze(-1)
-    return mask, env_indices
+    return torch.tensor(mask_list, dtype=torch.float32).unsqueeze(-1), env_indices
 
 
-
-# %%
 def DeepAnalysis(seq_list, deepblast_dict_path, T5_feature):
-
-    with open(deepblast_dict_path, "rb") as f:
+    with open(deepblast_dict_path, 'rb') as f:
         similarity_deepblast_dict = pickle.load(f)
-
-    # Collect the environments once, preserving one result group per input sequence.
     simenv = get_similarity_env(seq_list, similarity_deepblast_dict, T5_feature)
     simenv_seq = extract_last_element_from_nested_lists(simenv)
-
     all_sim_masks, all_sim_indices = [], []
-    for sequence_env in tqdm(simenv, desc="Processing complex_ids"):
-        # Masks corresponding to one input sequence's environments.
-        # These retain the batch dimension instead of being overwritten.
-        sim_mask, sim_indices = [], []
+    for sequence_env in tqdm(simenv, desc='Processing DeepBLAST templates'):
+        masks, indices = [], []
         for sim_info in sequence_env:
             mask_tmp, indices_tmp = build_mask_from_peptide_simenv(sim_info)
-            sim_mask.append(mask_tmp)
-            sim_indices.append(indices_tmp)
-        all_sim_masks.append(sim_mask)
-        all_sim_indices.append(sim_indices)
-
+            masks.append(mask_tmp)
+            indices.append(indices_tmp)
+        all_sim_masks.append(masks)
+        all_sim_indices.append(indices)
     return simenv_seq, all_sim_masks, all_sim_indices
-
-# %%
