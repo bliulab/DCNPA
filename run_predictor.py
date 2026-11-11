@@ -88,21 +88,62 @@ def run_db_in_venv(seq_list, uip, types):
             os.remove(tmp_pkl)
 
 
-def clean_uip_directory(uip_path):
-    if not os.path.exists(uip_path):
+def clean_uip_directory(uip_path, preserved_names):
+    """Clean only intermediates created by the just-completed extraction.
+
+    ``preserved_names`` must be a snapshot of the directory before feature
+    extraction. This avoids deleting arbitrary pre-existing user files while
+    clearing new temporary outputs that can otherwise contaminate later runs.
+    """
+    if not os.path.isdir(uip_path):
         return
-
-    keep_filenames = {'use_deepblast.txt', 'Peptide_Main.fasta', 'Protein_Main.fasta', 'Env_All.fasta'}
-
     for filename in os.listdir(uip_path):
+        if filename in preserved_names:
+            continue
         file_path = os.path.join(uip_path, filename)
-        
-        if os.path.isfile(file_path):
-            if filename not in keep_filenames:
-                try:
-                    os.remove(file_path)
-                except OSError as exc:
-                    logging.warning("Could not remove %s: %s", file_path, exc)
+        if os.path.isfile(file_path) and not os.path.islink(file_path):
+            try:
+                os.remove(file_path)
+            except OSError as exc:
+                logging.warning('Could not remove generated temporary file %s: %s',
+                                file_path, exc)
+
+
+def read_single_fasta(file_path, description):
+    """Read exactly one complete (possibly multi-line) FASTA sequence."""
+    from Bio import SeqIO
+
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f'{description} FASTA not found: {file_path}')
+
+    with open(file_path, 'r', encoding='utf-8') as handle:
+        records = list(SeqIO.parse(handle, 'fasta'))
+
+    if len(records) != 1:
+        raise ValueError(
+            f'{description} FASTA must contain exactly one sequence; '
+            f'found {len(records)} in {file_path}. '
+            'Run each peptide-protein pair separately.'
+        )
+
+    sequence = str(records[0].seq).strip().upper()
+    if not sequence:
+        raise ValueError(f'{description} FASTA contains an empty sequence: {file_path}')
+    return sequence
+
+
+def read_environment_fasta(file_path):
+    """Read complete environmental chains, including multi-line FASTA records."""
+    from Bio import SeqIO
+    if not os.path.isfile(file_path):
+        return []
+    with open(file_path, 'r', encoding='utf-8') as handle:
+        records = list(SeqIO.parse(handle, 'fasta'))
+    sequences = [str(rec.seq).strip().upper() for rec in records]
+    if any(not seq for seq in sequences):
+        raise ValueError(f'Environment FASTA contains an empty sequence: {file_path}')
+    return sequences
+
 
 def SeqMask(seqlen_list, seqlen_lim, device):
     seq_mask = torch.zeros((len(seqlen_list), seqlen_lim), dtype=torch.float32)
@@ -283,17 +324,20 @@ if __name__ == '__main__':
     pro_uip = os.path.join(uip, 'Protein_Main.fasta')
     env_uip = os.path.join(uip, 'Env_All.fasta')
     
-    pep_seq_list, pro_seq_list = [], []
-    for i in open(pep_uip):
-        if i[0] != '>':
-            pep_seq_list.append(i.strip().upper())
-    for i in open(pro_uip):
-        if i[0] != '>':
-            pro_seq_list.append(i.strip().upper())
+    # One peptide-protein pair per run; multi-line FASTA is supported.
+    peptide_sequence = read_single_fasta(pep_uip, 'Peptide')
+    protein_sequence = read_single_fasta(pro_uip, 'Protein')
+    if len(peptide_sequence) > 50:
+        raise ValueError('Peptide sequence exceeds the supported 50 residues.')
+    if len(protein_sequence) > 800:
+        raise ValueError('Protein sequence exceeds the supported 800 residues.')
+    pep_seq_list = [peptide_sequence]
+    pro_seq_list = [protein_sequence]
 
+    files_before_extraction = set(os.listdir(uip))
     (protein_features, peptide_features) = parallel_feature_extract(pro_seq_list, pep_seq_list, uip)
 
-    clean_uip_directory(uip)
+    clean_uip_directory(uip, files_before_extraction)
 
     protein_seq_feature, protein_2_feature, protein_dense_feature, protein_ss_feature, protein_pretrain_feature, protein_edge_feature = protein_features
     peptide_seq_feature, peptide_2_feature, peptide_dense_feature, peptide_ss_feature, peptide_pretrain_feature, peptide_edge_feature = peptide_features
@@ -317,7 +361,10 @@ if __name__ == '__main__':
         run_db_in_venv(pep_seq_list, uip, 'peptide')
         run_db_in_venv(pro_seq_list, uip, 'protein')
 
-        base_path = 'savefeatures/'
+        # Prefer repository-local template dictionaries; optional external path.
+        base_path = os.path.abspath(os.path.expanduser(
+            os.environ.get('DCNPA_FEATURES_DIR', os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'savefeatures'))))
         prefixes = ['peptide', 'protein']
         feat_mapping = {
             '': 'feature', 
@@ -338,8 +385,33 @@ if __name__ == '__main__':
                 with open(file_path, 'rb') as f:
                     feats[dict_key] = pickle.load(f, encoding='iso-8859-1')
 
-        peptide_simenv_seq, peptide_sim_masks, peptide_sim_indices = DeepAnalysis(pep_seq_list, os.path.join(uip, 'peptide_similarity_dict.pkl'), feats['peptide_T5_feature'])
-        protein_simenv_seq, protein_sim_masks, protein_sim_indices = DeepAnalysis(pro_seq_list, os.path.join(uip, 'protein_similarity_dict.pkl'), feats['protein_T5_feature'])
+        # Keep only reference templates whose complete feature set is available.
+        # DeepAnalysis receives the same target->template-list schema as the
+        # offline dictionaries used during model development.
+        required_labels = ('feature', 'ss_feature', '2_feature', 'T5_feature',
+                           'dense_feature', 'edge_feature')
+
+        def complete_template_features(prefix):
+            feature_keys = [set(feats[f'{prefix}_{label}']) for label in required_labels]
+            usable = set.intersection(*feature_keys)
+            logging.info('%s feature-complete template sequences: %d', prefix, len(usable))
+            return {seq: feats[f'{prefix}_T5_feature'][seq] for seq in usable}
+
+        peptide_simenv_seq, peptide_sim_masks, peptide_sim_indices = DeepAnalysis(
+            pep_seq_list, os.path.join(uip, 'peptide_similarity_dict.pkl'),
+            complete_template_features('peptide'))
+        protein_simenv_seq, protein_sim_masks, protein_sim_indices = DeepAnalysis(
+            pro_seq_list, os.path.join(uip, 'protein_similarity_dict.pkl'),
+            complete_template_features('protein'))
+
+        pep_hits = [len(group) for group in peptide_simenv_seq]
+        pro_hits = [len(group) for group in protein_simenv_seq]
+        logging.info('Template integration: peptide hits per query=%s; protein hits per query=%s',
+                     pep_hits, pro_hits)
+        if not any(pep_hits) and not any(pro_hits):
+            logging.warning('No feature-complete DeepBLAST templates were retained. '
+                            'Target-adaptive contributions may be absent for this input. '
+                            'Check the alignment threshold and reference feature dictionaries.')
 
         peptide_sim_mask, peptide_sim_index = pad_alignment_data(
             peptide_sim_masks, peptide_sim_indices, 50
@@ -383,18 +455,11 @@ if __name__ == '__main__':
     peptide_merenv_seq = [[]]
     protein_merenv_seq = [[]]
     
-    if os.path.exists(env_uip):
-        with open(env_uip, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('>'):
-                    continue
-                
-                seq = line.upper()
-                if len(seq) <= 50:
-                    protein_merenv_seq[0].append(seq)
-                else:
-                    peptide_merenv_seq[0].append(seq)
+    for seq in read_environment_fasta(env_uip):
+        if len(seq) <= 50:
+            protein_merenv_seq[0].append(seq)
+        else:
+            peptide_merenv_seq[0].append(seq)
 
     # ``peptide_merenv_seq`` stores protein-like environmental chains (>50 aa)
     # in the original naming convention. Pad these chains to their real maximum
@@ -421,6 +486,7 @@ if __name__ == '__main__':
 
     # Extract peptide features one by one (lower-level functions can only process one sequence at a time).
     for r_seq in unique_env_peps:
+        files_before_extraction = set(os.listdir(uip))
         r_feats = protein_feature_extract([r_seq], uip)
         protein_feature_dict_merenv[r_seq]      = r_feats[0][0]
         protein_2_feature_dict_merenv[r_seq]    = r_feats[1][0]
@@ -428,10 +494,11 @@ if __name__ == '__main__':
         protein_ss_feature_dict_merenv[r_seq]     = r_feats[3][0]
         protein_T5_feature_dict_merenv[r_seq]     = r_feats[4][0]
         protein_edge_feature_dict_merenv[r_seq]   = r_feats[5][0]
-        clean_uip_directory(uip)
+        clean_uip_directory(uip, files_before_extraction)
 
     # Extract protein features one by one (lower-level functions can only process one sequence at a time).
     for p_seq in unique_env_pros:
+        files_before_extraction = set(os.listdir(uip))
         p_feats = peptide_feature_extract([p_seq], uip)
         peptide_feature_dict_merenv[p_seq]      = p_feats[0][0]
         peptide_2_feature_dict_merenv[p_seq]    = p_feats[1][0]
@@ -439,7 +506,7 @@ if __name__ == '__main__':
         peptide_ss_feature_dict_merenv[p_seq]     = p_feats[3][0]
         peptide_T5_feature_dict_merenv[p_seq]     = p_feats[4][0]
         peptide_edge_feature_dict_merenv[p_seq]   = p_feats[5][0]
-        clean_uip_directory(uip)
+        clean_uip_directory(uip, files_before_extraction)
 
     peptide_merenv_seq_padded = pad_and_stack_nested_tensor(peptide_merenv_seq, protein_feature_dict_merenv, protein_merenv_max_len).long()
     protein_merenv_seq_padded = pad_and_stack_nested_tensor(protein_merenv_seq, peptide_feature_dict_merenv, 50).long()
