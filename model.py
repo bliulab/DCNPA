@@ -437,9 +437,32 @@ class DCNPA(nn.Module):
                     
         
         # ================       multi-view interaction modeling and fusion       ================     
+        # Normalize interaction maps
         matmul_pair_origin = self.norm_origin(matmul_pair_origin)
         matmul_pair_mer_pep = self.norm_mer_pep(matmul_pair_mer_pep)
         matmul_pair_mer_pro = self.norm_mer_pro(matmul_pair_mer_pro)
+
+        # Identify samples with valid environmental-chain features
+        B = matmul_pair_origin.shape[0]
+
+        has_mer_pep = (
+            peptide_merenv_pretrain_padded.reshape(B, -1)
+            .ne(0).any(dim=1)
+        )
+
+        has_mer_pro = (
+            protein_merenv_pretrain_padded.reshape(B, -1)
+            .ne(0).any(dim=1)
+        )
+
+        # Suppress learned LayerNorm offsets for absent environments
+        matmul_pair_mer_pep = matmul_pair_mer_pep * (
+            has_mer_pep[:, None, None].to(matmul_pair_mer_pep.dtype)
+        )
+
+        matmul_pair_mer_pro = matmul_pair_mer_pro * (
+            has_mer_pro[:, None, None].to(matmul_pair_mer_pro.dtype)
+        )
 
         interaction_mask = torch.matmul(protein_mask.unsqueeze(-1), peptide_mask.unsqueeze(1))
         weights = F.softmax(self.raw_weight, dim=0)
