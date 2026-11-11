@@ -249,47 +249,57 @@ def secondary_structure_feature_extract(seqlist, uip, seqtype, seq_max_length):
     return out
 
 # Sequence Pre-training Feature Extraction
-def pretrain_feature_extract(seqlist, uip, seqtype, seq_max_length):    
-    _, sequnique = read_seq_and_index(os.path.join(uip, seqtype + '_Seq.fasta'))
-    
-    seqexa = []
-    for tmp1 in range(len(sequnique)):
-        seqtmp = sequnique[tmp1]
-        sequse = ''
-        count = 0
-        for tmp2 in seqtmp:
-            sequse += tmp2
-            count += 1
-            if count == len(seqtmp):
-                continue
-            sequse += ' '
-        seqexa.append(sequse)
+def pretrain_feature_extract(seqlist, uip, seqtype, seq_max_length):
+    """Extract residue-level ProtT5 embeddings in explicit inference mode.
+
+    The pretrained model, tokenizer, sequence normalization and return format
+    are unchanged. The explicit eval/no_grad settings make inference behavior
+    transparent and avoid unnecessary autograd graph construction.
+    """
+    _, sequnique = read_seq_and_index(
+        os.path.join(uip, seqtype + '_Seq.fasta')
+    )
+
+    # Preserve the original one-amino-acid-per-token preparation.
+    seqexa = [' '.join(seqtmp) for seqtmp in sequnique]
 
     model = T5EncoderModel.from_pretrained(T5MODEL_FOLD)
     tokenizer = T5Tokenizer.from_pretrained(T5MODEL_FOLD)
-    
+    model.eval()  # Explicitly disable dropout; no pretrained weights are changed.
+
     pretrain_feature_dict = {}
-    for tmp in range(len(seqexa)):
-        print('Current: ' + str(tmp) + '\n')
-        seqlen = len(sequnique[tmp])
-        sequence_Example = seqexa[tmp]
-        sequence_Example = re.sub(r"[UZOB]", "X", sequence_Example)
-        encoded_input = tokenizer(sequence_Example, return_tensors='pt')
-        output = model(**encoded_input)
-        result = output[0][0][:seqlen]
-        seq_tmp_feature = result.detach().numpy()
-        if len(seq_tmp_feature) < seq_max_length:
-            diff = seq_max_length - len(seq_tmp_feature)
-            diffarr = np.zeros((diff, seq_tmp_feature.shape[1]))
-            use = np.vstack((seq_tmp_feature, diffarr))
-        else:
-            use = seq_tmp_feature[0:seq_max_length, ]
-        if use.shape[0] == seq_max_length:
-            pretrain_feature_dict[sequnique[tmp]] = np.array(use)
-        else:
-            print('error!')
-            break
-    
+    with torch.no_grad():
+        for tmp, sequence_Example in enumerate(seqexa):
+            print('Current: ' + str(tmp) + '\n')
+            seqlen = len(sequnique[tmp])
+            sequence_Example = re.sub(r"[UZOB]", "X", sequence_Example)
+            encoded_input = tokenizer(
+                sequence_Example,
+                return_tensors='pt',
+                return_attention_mask=True,
+            )
+            output = model(**encoded_input)
+            # The tokenizer adds a special token; retain only residue embeddings.
+            result = output.last_hidden_state[0, :seqlen]
+            if result.shape[0] != seqlen:
+                raise ValueError(
+                    f'ProtT5 residue count mismatch for sequence {tmp}: '
+                    f'expected {seqlen}, got {result.shape[0]}'
+                )
+            seq_tmp_feature = result.cpu().numpy()
+
+            if len(seq_tmp_feature) < seq_max_length:
+                diff = seq_max_length - len(seq_tmp_feature)
+                diffarr = np.zeros((diff, seq_tmp_feature.shape[1]))
+                use = np.vstack((seq_tmp_feature, diffarr))
+            else:
+                use = seq_tmp_feature[0:seq_max_length, ]
+
+            if use.shape[0] == seq_max_length:
+                pretrain_feature_dict[sequnique[tmp]] = np.array(use)
+            else:
+                raise ValueError('ProtT5 feature padding/truncation failed.')
+
     out = batch_feature(seqlist, pretrain_feature_dict, seq_max_length, 'float')
     return out.to(torch.float32)
 
